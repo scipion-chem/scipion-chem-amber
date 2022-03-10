@@ -24,10 +24,11 @@
 # *
 # **************************************************************************
 
+
 AMBER_HOME = 'AMBER_HOME'
 
 AMBER = 'amber'
-V2022 = '2022.1'
-AMBER_DEFAULT_VERSION = V2022
+V2020 = '2020.1'
+AMBER_DEFAULT_VERSION = V2020
 
 #PYMOL_HOME = 'PYMOL_HOME'

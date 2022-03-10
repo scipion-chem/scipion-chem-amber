@@ -24,22 +24,20 @@
 # *
 # **************************************************************************
 import pwem
-import pwchem
-import pyworkflow
 
-import pyworkflow
+from pyworkflow import join
 
-from amber.constants import AMBER_HOME, V2022, AMBER
+from amber.constants import AMBER_HOME, V2020, AMBER, AMBER_DEFAULT_VERSION
 
 _logo = "icon.png"
 _references = ['you2019']
 
 
-class Plugin(pwchem.Plugin):
+class Plugin(pwem.Plugin):
     _homeVar = AMBER_HOME
     _pathVars = [AMBER_HOME]
-    _supportedVersions = [V2022]
-    _gromacsName = AMBER + '-' + AMBER_DEFAULT_VERSION
+    _supportedVersions = [V2020]
+    _amberName = AMBER + '-' + AMBER_DEFAULT_VERSION
     _pluginHome = join(pwem.Config.EM_ROOT, _amberName)
 
     @classmethod
@@ -47,6 +45,54 @@ class Plugin(pwchem.Plugin):
         """ Return and write a variable in the config file.
         """
         cls._defineEmVar(AMBER_HOME, cls._amberName)
+
+    @classmethod
+    def defineBinaries(cls, env):
+        cMakeCmd = 'mkdir build && cd build && '
+        cMakeCmd += 'cmake .. -DGMX_BUILD_OWN_FFTW=ON -DREGRESSIONTEST_DOWNLOAD=ON ' \
+                           '-DCMAKE_INSTALL_PREFIX={} > cMake.log'.format(cls._pluginHome)
+        makeCmd = 'cd build && make -j {} > make.log && make check'.format(env.getProcessors())
+        makeInstallCmd = 'cd build && make install'
+
+        # Creating validation file
+        AMBER_INSTALLED = '%s_installed' % AMBER
+        installationCmd = 'touch %s' % AMBER_INSTALLED  # Flag installation finished
+
+        env.addPackage(AMBER,
+                       version=AMBER_DEFAULT_VERSION,
+                       url=cls._getAmberDownloadUrl(),
+                       commands=[(cMakeCmd, []),
+                                 (makeCmd, []),
+                                 (makeInstallCmd, []),
+                                 (installationCmd, AMBER_INSTALLED)],
+                       default=True)
+
+    @classmethod
+    def runAmbertools(cls, protocol, program, args, cwd=None):
+        """ Run Ambertools command from a given protocol. """
+        protocol.runJob(join(cls._pluginHome, 'bin/{}'.format(program)), args, cwd=cwd)
+
+    @classmethod
+    def runAmberPrintf(cls, protocol, program, printfValues, args, cwd=None):
+      """ Run Ambertools command from a given protocol. """
+      AmberPath = join(cls._pluginHome, 'bin/{}'.format(program))
+      program = 'printf "{}\n" | {}'.format('\n'.join(printfValues), AmberPath)
+      protocol.runJob(program, args, cwd=cwd)
+
+    @classmethod  # Test that
+    def getEnviron(cls):
+        pass
+
+    @classmethod
+    def _getAmberDownloadUrl(cls):
+        return 'https://ambermd.org/GetAmber.php{}.tar.gz'.format(AMBER_DEFAULT_VERSION)
+
+    @classmethod
+    def _getAmberTar(cls):
+        return cls._pluginHome + '/' + cls._amberName + '.tar.gz'
+
+    # ---------------------------------- Utils functions  -----------------------
+
 
 
 

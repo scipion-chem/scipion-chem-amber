@@ -26,18 +26,16 @@
 # **************************************************************************
 
 """
-@article{you2019,
-title = "Title of your paper ",
-journal = "...",
-volume = "...",
-number = ".",
-pages = "1 - 6",
-year = "2019",
-issn = "0000-1111",
-doi = "http://dx.doi.org/xxxxx/xxxxx",
-url = "http://www.url",
-author = "you and your team",
-keywords = "Single particle analysis Tomography",
+@article{Salomon-Ferrer2013,
+title = "An overview of the Amber biomolecular simulation package ",
+journal = "Wiley Interdisciplinary Reviews: Computational Molecular Science,"
+number = "3",
+pages = "198-210",
+year = "2013",
+doi = "10.1002/wcms.1121",
+url = "https://wires.onlinelibrary.wiley.com/doi/pdf/10.1002/wcms.1121",
+author = "Romelia Salomon-Ferrer, David A. Case and Ross C. Walker",
+keywords = "",
 }
 
 """
