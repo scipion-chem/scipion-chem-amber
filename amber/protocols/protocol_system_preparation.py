@@ -1,8 +1,9 @@
+# -*- coding: utf-8 -*-
 # **************************************************************************
 # *
-# * Authors:     Aida Pinacho (you@yourinstitution.email)
+# * Authors:     Aida Pinacho Pérez
 # *
-# * Biocomputing Unit, CNB-CSIC
+# * Unidad de  Bioinformatica of Centro Nacional de Biotecnologia , CSIC
 # *
 # * This program is free software; you can redistribute it and/or modify
 # * it under the terms of the GNU General Public License as published by
@@ -23,31 +24,6 @@
 # *  e-mail address 'scipion@cnb.csic.es'
 # *
 # **************************************************************************
-import pwem
-import pwchem
-import pyworkflow
-
-import pyworkflow
-
-from amber.constants import AMBER_HOME, V2022, AMBER
-
-_logo = "icon.png"
-_references = ['you2019']
-
-
-class Plugin(pwchem.Plugin):
-    _homeVar = AMBER_HOME
-    _pathVars = [AMBER_HOME]
-    _supportedVersions = [V2022]
-    _gromacsName = AMBER + '-' + AMBER_DEFAULT_VERSION
-    _pluginHome = join(pwem.Config.EM_ROOT, _amberName)
-
-    @classmethod
-    def _defineVariables(cls):
-        """ Return and write a variable in the config file.
-        """
-        cls._defineEmVar(AMBER_HOME, cls._amberName)
-
-
-
-
+"""
+This module will prepare the system for the simumlation
+"""
