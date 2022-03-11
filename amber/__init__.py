@@ -23,6 +23,7 @@
 # *  e-mail address 'scipion@cnb.csic.es'
 # *
 # **************************************************************************
+
 import pwem
 
 from pyworkflow import join
@@ -39,32 +40,33 @@ class Plugin(pwem.Plugin):
     _supportedVersions = [V2020]
     _amberName = AMBER + '-' + AMBER_DEFAULT_VERSION
     _pluginHome = join(pwem.Config.EM_ROOT, _amberName)
+    _Ambertools21Env = "Ambertools21"
 
     @classmethod
     def _defineVariables(cls):
         """ Return and write a variable in the config file.
         """
         cls._defineEmVar(AMBER_HOME, cls._amberName)
+        cls._defineVar("AMBERTOOLS_ENV_ACTIVATION", 'conda activate %s' % cls._Ambertools21Env)
 
     @classmethod
-    def defineBinaries(cls, env):
-        cMakeCmd = 'mkdir build && cd build && '
-        cMakeCmd += 'cmake .. -DGMX_BUILD_OWN_FFTW=ON -DREGRESSIONTEST_DOWNLOAD=ON ' \
-                           '-DCMAKE_INSTALL_PREFIX={} > cMake.log'.format(cls._pluginHome)
-        makeCmd = 'cd build && make -j {} > make.log && make check'.format(env.getProcessors())
-        makeInstallCmd = 'cd build && make install'
+    def getAmbertoolsEnvActivation(cls):
+        activation = cls.getVar("AMBERTOOLS_ENV_ACTIVATION")
+        return activation
 
-        # Creating validation file
+    @classmethod
+    def defineBinaries(cls, env, default=False):
+        # Creating a new conda enviroment for Ambertools21
         AMBER_INSTALLED = '%s_installed' % AMBER
-        installationCmd = 'touch %s' % AMBER_INSTALLED  # Flag installation finished
+        ambertools_commands = 'conda create -y -n %s && ' % cls._Ambertools21Env
+        ambertools_commands += '%s %s && ' % (cls.getCondaActivationCmd(), cls.getAmbertoolsEnvActivation())
+        ambertools_commands += 'conda install -y -c conda-forge ambertools=21 compilers && '
+        ambertools_commands += 'touch {}'.format(AMBER_INSTALLED)  # Flag installation finished
 
-        env.addPackage(AMBER,
-                       version=AMBER_DEFAULT_VERSION,
-                       url=cls._getAmberDownloadUrl(),
-                       commands=[(cMakeCmd, []),
-                                 (makeCmd, []),
-                                 (makeInstallCmd, []),
-                                 (installationCmd, AMBER_INSTALLED)],
+        ambertools_commands = [(ambertools_commands, AMBER_INSTALLED)]
+        env.addPackage('ambertools', version='21',
+                       tar='void.tgz',
+                       commands=ambertools_commands,
                        default=True)
 
     @classmethod
@@ -82,14 +84,6 @@ class Plugin(pwem.Plugin):
     @classmethod  # Test that
     def getEnviron(cls):
         pass
-
-    @classmethod
-    def _getAmberDownloadUrl(cls):
-        return 'https://ambermd.org/GetAmber.php{}.tar.gz'.format(AMBER_DEFAULT_VERSION)
-
-    @classmethod
-    def _getAmberTar(cls):
-        return cls._pluginHome + '/' + cls._amberName + '.tar.gz'
 
     # ---------------------------------- Utils functions  -----------------------
 
