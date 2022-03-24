@@ -1,6 +1,6 @@
 # **************************************************************************
 # *
-# * Authors:     Aida Pinacho (you@yourinstitution.email)
+# * Authors:     Aida Pinacho
 # *
 # * Biocomputing Unit, CNB-CSIC
 # *
@@ -29,16 +29,17 @@ import pwem
 from pyworkflow import join
 
 from amber.constants import AMBER_HOME, V2020, AMBER, AMBER_DEFAULT_VERSION
+from pwem.convert.atom_struct import getEnviron
 
 _logo = "icon.png"
-_references = ['you2019']
+_references = ['Salomon-Ferrer2013']
 
 
 class Plugin(pwem.Plugin):
     _homeVar = AMBER_HOME
     _pathVars = [AMBER_HOME]
     _supportedVersions = [V2020]
-    _amberName = AMBER + '-' + AMBER_DEFAULT_VERSION
+    _amberName = 'ambertools-21'
     _pluginHome = join(pwem.Config.EM_ROOT, _amberName)
     _Ambertools21Env = "Ambertools21"
 
@@ -72,22 +73,22 @@ class Plugin(pwem.Plugin):
     @classmethod
     def runAmbertools(cls, protocol, program, args, cwd=None):
         """ Run Ambertools command from a given protocol. """
-        protocol.runJob(join(cls._pluginHome, 'bin/{}'.format(program)), args, cwd=cwd)
+        fullProgram = '%s %s && %s' % (cls.getCondaActivationCmd(), cls.getAmbertoolsEnvActivation(), program)
+        protocol.runJob(fullProgram, args, env=cls.getEnviron_amber(), cwd=cwd)
 
+#join(cls._pluginHome, 'bin/{}'.format(program))
     @classmethod
     def runAmberPrintf(cls, protocol, program, printfValues, args, cwd=None):
-      """ Run Ambertools command from a given protocol. """
-      AmberPath = join(cls._pluginHome, 'bin/{}'.format(program))
-      program = 'printf "{}\n" | {}'.format('\n'.join(printfValues), AmberPath)
-      protocol.runJob(program, args, cwd=cwd)
+        """ Run Ambertools command from a given protocol. """
+        AmberPath = join(cls._pluginHome, 'bin/{}'.format(program))
+        program = 'printf "{}\n" | {}'.format('\n'.join(printfValues), AmberPath)
+        protocol.runJob(program, args, cwd=cwd)
 
     @classmethod  # Test that
-    def getEnviron(cls):
+    def getEnviron_amber(cls):
         pass
 
     # ---------------------------------- Utils functions  -----------------------
-
-
-
-
-
+    @classmethod
+    def runAmber(cls, self, param, params, cwd):
+        pass
