@@ -130,23 +130,52 @@ class AmberSystemPrep(EMProtocol):
                        label='Use tleap to add missing atoms (EXPERIMENTAL): ')
 
         form.addSection('MD prep')
-        group = form.addGroup('Force field')
-        group.addParam('MainForceField', params.EnumParam,
-                       choices=AMBERFF_LIST, default=AMBERFF_FF19SB,
-                       label='Main Force Field',
-                       help='Force field applied to the system. Force fields are sets of potential functions and '
-                            'parametrized interactions that can be used to study physical systems')
+        group = form.addGroup('Force field', help='Force field applied to the system. Force fields are sets of '
+                                                  'potential functions and '
+                                                  'parametrized interactions that can be used to study physical '
+                                                  'systems. You should select as '
+                                                  'many force fields as molecules in your system (i.e protein + ligand')
+
+        group.addParam('ProteinForceField', params.BooleanParam, allowsNull=True,
+                       label='Protein Force Field')
+        group.addParam('LigandForceField', params.BooleanParam, allowsNull=True,
+                       label='Ligand Force Field')
+        group.addParam('DNAForceField', params.BooleanParam, allowsNull=True,
+                       label='DNA Force Field')
+        group.addParam('RNAForceField', params.BooleanParam, allowsNull=True,
+                       label='RNA Force Field')
+        group.addParam('LipidForceField', params.BooleanParam, allowsNull=True,
+                       label='Lipid Force Field')
         group.addParam('WaterForceField', params.EnumParam,
-                       choices=AMBER_WATERS_LIST, default=AMBER_OPC,
+                       choices=AMBER_WATERS_LIST, default=AMBER_TIP3P,
+                       allowsNull=True,
                        label='Water Force Field: ',
-                       help='Force field applied to the waters')
+                       help='Force field applied to the water')
+
+        group = form.addGroup('Disulfide bridges')
+        group.addParam('DisulfideBridges', params.BooleanParam,
+                       label='Are there any S-S bridges?',
+                       help='Residues involved must be renamed to CYX in the pdb file')
+        group.addParam('DisulfideBridgesNumber', params.StringParam,
+                       condition='DisulfideBridges',
+                       label='Number of the residues involved in the disulfide bridge \n'
+                             'with format 1º Residue - 2º Residue / 1º Residue - 2º Residue')
+
+        group = form.addGroup('Solvate')
+        group.addParam('SolvateStep', params.EnumParam,
+                       choices=['SolvateBox', 'SolvateOct'], defalult='SolvateOct',
+                       label='Solvation box',
+                       help='Both solvation boxes will be isometric')
+        line = group.addLine('Box size:')
+        line.addParam('Distance', params.FloatParam,
+                      default=20.0)
 
     # --------------------------- STEPS functions ------------------------------
 
     def _insertAllSteps(self):
         # Insert processing steps
         self._insertFunctionStep('PDBAmberStep')
-        self._insertFunctionStep('preparationStep')
+        self._insertFunctionStep('ForceFieldStep')
         self._insertFunctionStep('createOutputStep')
 
     def PDBAmberStep(self):
@@ -156,7 +185,7 @@ class AmberSystemPrep(EMProtocol):
             inputStructure = self.convertPDB(inputStructure)
 
         systemBasename = os.path.basename(inputStructure.split(".")[0])
-        params = '{} > {}.amber.pdb '.format(inputStructure, systemBasename)
+        params = '{} > {}.amber.pdb --no-conect'.format(inputStructure, systemBasename)
 
         if self.proteinResidues:
             params += '-p '
@@ -171,19 +200,51 @@ class AmberSystemPrep(EMProtocol):
 
         amber.Plugin.runAmbertools(self, 'pdb4amber', params, cwd=self._getPath())
 
-    def preparationStep(self):
+    def ForceFieldStep(self):
         inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
         systemBasename = os.path.basename(inputStructure.split(".")[0])
-        Mainff = AMBER_MAINFF_NAME[self.MainForceField.get()]
+
         Waterff = AMBER_WATERFF_NAME[self.WaterForceField.get()]
-        params = '\n source leaprc.{} \n' \
-                 'source leaprc.water.{}\n' \
-                 '{} = loadPdb "{}.amber.pdb"\n'\
-                 'saveAmberParm {} {}.top {}.crd'.format(Mainff, Waterff, systemBasename, systemBasename, systemBasename, systemBasename, systemBasename)
+        params = '-f tleap_commands.txt'
+        file = open(self._getPath("tleap_commands.txt"), "w")
+
+        if self.ProteinForceField:
+            file.write('source leaprc.protein.ff19SB \n')
+        if self.LigandForceField:
+            file.write('source leaprc.gaff2 \n')
+        if self.DNAForceField:
+            file.write('source leaprc.DNA.OL15 \n')
+        if self.RNAForceField:
+            file.write('source leaprc.RNA.OL3 \n')
+        if self.LipidForceField:
+            file.write('source leaprc.lipid17 \n')
+        if self.WaterForceField:
+            file.write('source leaprc.water.{} \n'.format(Waterff))
+
+        file.write('APO = loadPdb {}.amber.pdb \n'.format(systemBasename))
+
+        for pair in self.DisulfideBridgesNumber.get().split('/'):
+            first = pair.split('-')[0]
+            second = pair.split('-')[1]
+
+        if self.DisulfideBridges:
+            file.write('bond APO.{}.SG APO.{}.SG \n'.format(first, second))
+
+        Boxtype = self.getEnumText('SolvateStep')
+
+        file.write('charge APO \n'
+                   '{} APO TIP3PBOX {} iso \n'.format(Boxtype, self.Distance.get()))
+
+        file.write('addIons APO Cl- 0 \n'
+                   'addIons APO Na+ 0 \n')
+
+        file.write('saveAmberParm APO {}.prmtop {}.crd \n'
+                   'savepdb APO {}_check.pdb \n'
+                   'quit'.format(systemBasename, systemBasename, systemBasename))
+
+        file.close()
 
         amber.Plugin.runAmbertools(self, 'tleap', params, cwd=self._getPath())
-
-    # ------------------------POR AQUI VOY------------------------#
 
     def createOutputStep(self):
         pass
