@@ -66,7 +66,7 @@ AMBER_OPC = 5
 AMBER_OPC3 = 6
 AMBER_POL3 = 7
 AMBER_TIP3PFB = 8
-AMBER_TIP4PFB = 9
+AMBER_TIP3P = 9
 
 AMBER_WATERFF_NAME = dict()
 AMBER_WATERFF_NAME[AMBER_TIP4] = 'tip4'
@@ -78,13 +78,13 @@ AMBER_WATERFF_NAME[AMBER_OPC] = 'opc'
 AMBER_WATERFF_NAME[AMBER_OPC3] = 'opc3'
 AMBER_WATERFF_NAME[AMBER_POL3] = 'pol3'
 AMBER_WATERFF_NAME[AMBER_TIP3PFB] = 'tip3pfb'
-AMBER_WATERFF_NAME[AMBER_TIP4PFB] = 'tip4pfb'
+AMBER_WATERFF_NAME[AMBER_TIP3P] = 'tip4pfb'
 
 AMBER_WATERS_LIST = [AMBER_WATERFF_NAME[AMBER_TIP4], AMBER_WATERFF_NAME[AMBER_TIP4PEW],
                      AMBER_WATERFF_NAME[AMBER_TIP5P], AMBER_WATERFF_NAME[AMBER_SPCE],
                      AMBER_WATERFF_NAME[AMBER_SPCEB], AMBER_WATERFF_NAME[AMBER_OPC],
                      AMBER_WATERFF_NAME[AMBER_OPC3], AMBER_WATERFF_NAME[AMBER_POL3],
-                     AMBER_WATERFF_NAME[AMBER_TIP3PFB], AMBER_WATERFF_NAME[AMBER_TIP4PFB]]
+                     AMBER_WATERFF_NAME[AMBER_TIP3PFB], AMBER_WATERFF_NAME[AMBER_TIP3P]]
 
 
 class AmberSystemPrep(EMProtocol):
@@ -205,8 +205,8 @@ class AmberSystemPrep(EMProtocol):
         systemBasename = os.path.basename(inputStructure.split(".")[0])
 
         Waterff = AMBER_WATERFF_NAME[self.WaterForceField.get()]
-        params = '-f tleap_commands.txt'
-        file = open(self._getPath("tleap_commands.txt"), "w")
+        params = '-f extra/tleap_commands.txt'
+        file = open(self._getExtraPath("tleap_commands.txt"), "w")
 
         if self.ProteinForceField:
             file.write('source leaprc.protein.ff19SB \n')
