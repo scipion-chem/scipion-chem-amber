@@ -26,9 +26,26 @@
 import os, glob, subprocess
 import pyworkflow.viewer as pwviewer
 import pyworkflow.protocol.params as params
-
-import amber
 from pwchem.viewers import VmdViewPopen
 from pwem.objects import SetOfAtomStructs, AtomStruct
 from pwem.viewers import ChimeraViewer
 
+from pwchem.viewers import PyMolViewer, PyMolView
+from pwchem.utils import natural_sort
+
+from amber import Plugin
+from ..objects import AmberSystem
+from ..protocols import AmberSystemPrep
+from ..constants import *
+
+
+class AmberSystemViewer(pwviewer.Viewer):
+    _label = 'Viewer AMBER system'
+    _environments = [pwviewer.DESKTOP_TKINTER]
+    _targets = [AmberSystem]
+
+    def _visualize(self, obj, **kwargs):
+        amberFile = os.path.abspath(obj.getCheckFile())
+
+        pymolV = PyMolViewer(project=self.getProject())
+        return pymolV._visualize(amberFile, cwd=os.path.dirname(amberFile))

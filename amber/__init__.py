@@ -76,13 +76,15 @@ class Plugin(pwem.Plugin):
         fullProgram = '%s %s && %s' % (cls.getCondaActivationCmd(), cls.getAmbertoolsEnvActivation(), program)
         protocol.runJob(fullProgram, args, env=cls.getEnviron_amber(), cwd=cwd)
 
-#join(cls._pluginHome, 'bin/{}'.format(program))
+
     @classmethod
     def runAmberPrintf(cls, protocol, program, printfValues, args, cwd=None):
         """ Run Ambertools command from a given protocol. """
         AmberPath = join(cls._pluginHome, 'bin/{}'.format(program))
         program = 'printf "{}\n" | {}'.format('\n'.join(printfValues), AmberPath)
         protocol.runJob(program, args, cwd=cwd)
+
+
 
     @classmethod  # Test that
     def getEnviron_amber(cls):

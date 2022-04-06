@@ -38,53 +38,7 @@ from pyworkflow.utils import Message
 import amber
 from pwchem.utils import runOpenBabel
 
-AMBERFF_FF19SB = 0
-AMBERFF_0L15 = 1
-AMBERFF_OL3 = 2
-AMBERFF_GLYCAM_06J = 3
-AMBERFF_LIPID17 = 4
-AMBERFF_GAFF2 = 5
-
-AMBER_MAINFF_NAME = dict()
-AMBER_MAINFF_NAME[AMBERFF_FF19SB] = 'protein.ff19SB'
-AMBER_MAINFF_NAME[AMBERFF_0L15] = 'DNA.OL15'
-AMBER_MAINFF_NAME[AMBERFF_OL3] = 'RNA.OL3'
-AMBER_MAINFF_NAME[AMBERFF_GLYCAM_06J] = 'GLYCAM_06J-1'
-AMBER_MAINFF_NAME[AMBERFF_LIPID17] = 'lipid17'
-AMBER_MAINFF_NAME[AMBERFF_GAFF2] = 'gaff2'
-
-AMBERFF_LIST = [AMBER_MAINFF_NAME[AMBERFF_FF19SB], AMBER_MAINFF_NAME[AMBERFF_0L15],
-                AMBER_MAINFF_NAME[AMBERFF_OL3], AMBER_MAINFF_NAME[AMBERFF_GLYCAM_06J],
-                AMBER_MAINFF_NAME[AMBERFF_LIPID17], AMBER_MAINFF_NAME[AMBERFF_GAFF2]]
-
-AMBER_TIP4 = 0
-AMBER_TIP4PEW = 1
-AMBER_TIP5P = 2
-AMBER_SPCE = 3
-AMBER_SPCEB = 4
-AMBER_OPC = 5
-AMBER_OPC3 = 6
-AMBER_POL3 = 7
-AMBER_TIP3PFB = 8
-AMBER_TIP3P = 9
-
-AMBER_WATERFF_NAME = dict()
-AMBER_WATERFF_NAME[AMBER_TIP4] = 'tip4'
-AMBER_WATERFF_NAME[AMBER_TIP4PEW] = 'tip4pew'
-AMBER_WATERFF_NAME[AMBER_TIP5P] = 'tip5p'
-AMBER_WATERFF_NAME[AMBER_SPCE] = 'spce'
-AMBER_WATERFF_NAME[AMBER_SPCEB] = 'spceb'
-AMBER_WATERFF_NAME[AMBER_OPC] = 'opc'
-AMBER_WATERFF_NAME[AMBER_OPC3] = 'opc3'
-AMBER_WATERFF_NAME[AMBER_POL3] = 'pol3'
-AMBER_WATERFF_NAME[AMBER_TIP3PFB] = 'tip3pfb'
-AMBER_WATERFF_NAME[AMBER_TIP3P] = 'tip4pfb'
-
-AMBER_WATERS_LIST = [AMBER_WATERFF_NAME[AMBER_TIP4], AMBER_WATERFF_NAME[AMBER_TIP4PEW],
-                     AMBER_WATERFF_NAME[AMBER_TIP5P], AMBER_WATERFF_NAME[AMBER_SPCE],
-                     AMBER_WATERFF_NAME[AMBER_SPCEB], AMBER_WATERFF_NAME[AMBER_OPC],
-                     AMBER_WATERFF_NAME[AMBER_OPC3], AMBER_WATERFF_NAME[AMBER_POL3],
-                     AMBER_WATERFF_NAME[AMBER_TIP3PFB], AMBER_WATERFF_NAME[AMBER_TIP3P]]
+import amber.objects as amberobj
 
 
 class AmberSystemPrep(EMProtocol):
@@ -138,16 +92,22 @@ class AmberSystemPrep(EMProtocol):
 
         group.addParam('ProteinForceField', params.BooleanParam, allowsNull=True,
                        label='Protein Force Field')
+        group.addParam('ProteinForceFieldType', params.EnumParam,
+                       label='Type',
+                       choices=['ff14SB', 'ff19SB', 'ff14SBonlysc', 'ff15ipq', 'fb15', 'ff03.r1', 'ff03ua'],
+                       condition='ProteinForceField')
         group.addParam('LigandForceField', params.BooleanParam, allowsNull=True,
                        label='Ligand Force Field')
         group.addParam('DNAForceField', params.BooleanParam, allowsNull=True,
                        label='DNA Force Field')
         group.addParam('RNAForceField', params.BooleanParam, allowsNull=True,
                        label='RNA Force Field')
+        group.addParam('RNAForceFieldType', params.EnumParam, condition='RNAForceField',
+                       label='Type', choices=['OL3', 'LJbb', 'YIL', 'ROC', 'Shaw'])
         group.addParam('LipidForceField', params.BooleanParam, allowsNull=True,
                        label='Lipid Force Field')
         group.addParam('WaterForceField', params.EnumParam,
-                       choices=AMBER_WATERS_LIST, default=AMBER_TIP3P,
+                       choices=['tip4pew', 'spce', 'spceb', 'opc', 'opc3', 'tip3p'],
                        allowsNull=True,
                        label='Water Force Field: ',
                        help='Force field applied to the water')
@@ -163,7 +123,7 @@ class AmberSystemPrep(EMProtocol):
 
         group = form.addGroup('Solvate')
         group.addParam('SolvateStep', params.EnumParam,
-                       choices=['SolvateBox', 'SolvateOct'], defalult='SolvateOct',
+                       choices=['Cubic', 'Octahedric'], defalult='Octahedric',
                        label='Solvation box',
                        help='Both solvation boxes will be isometric')
         line = group.addLine('Box size:')
@@ -203,51 +163,74 @@ class AmberSystemPrep(EMProtocol):
     def ForceFieldStep(self):
         inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
         systemBasename = os.path.basename(inputStructure.split(".")[0])
-
-        Waterff = AMBER_WATERFF_NAME[self.WaterForceField.get()]
-        params = '-f extra/tleap_commands.txt'
-        file = open(self._getExtraPath("tleap_commands.txt"), "w")
+        params = '\n'
 
         if self.ProteinForceField:
-            file.write('source leaprc.protein.ff19SB \n')
+            params += 'source leaprc.protein.{} \n'.format(self.getEnumText('ProteinForceFieldType'))
         if self.LigandForceField:
-            file.write('source leaprc.gaff2 \n')
+            params += 'source leaprc.gaff2 \n'
         if self.DNAForceField:
-            file.write('source leaprc.DNA.OL15 \n')
+            params += 'source leaprc.DNA.OL15 \n'
         if self.RNAForceField:
-            file.write('source leaprc.RNA.OL3 \n')
+            params += 'source leaprc.RNA.{} \n'.format(self.getEnumText('RNAForceFieldType'))
         if self.LipidForceField:
-            file.write('source leaprc.lipid17 \n')
+            params += 'source leaprc.lipid17 \n'
         if self.WaterForceField:
-            file.write('source leaprc.water.{} \n'.format(Waterff))
+            params += 'source leaprc.water.{} \n'.format(self.getEnumText('WaterForceField'))
 
-        file.write('APO = loadPdb {}.amber.pdb \n'.format(systemBasename))
-
-        for pair in self.DisulfideBridgesNumber.get().split('/'):
-            first = pair.split('-')[0]
-            second = pair.split('-')[1]
+        params += 'APO = loadPdb {}.amber.pdb \n'.format(systemBasename)
 
         if self.DisulfideBridges:
-            file.write('bond APO.{}.SG APO.{}.SG \n'.format(first, second))
 
-        Boxtype = self.getEnumText('SolvateStep')
+            for pair in self.DisulfideBridgesNumber.get().split('/'):
+                first = pair.split('-')[0]
+                second = pair.split('-')[1]
+                params += 'bond APO.{}.SG APO.{}.SG \n'.format(first, second)
 
-        file.write('charge APO \n'
-                   '{} APO TIP3PBOX {} iso \n'.format(Boxtype, self.Distance.get()))
+        if self.getEnumText('SolvateStep') == 'Cubic':
+            Boxtype = 'SolvateBox'
+        else:
+            Boxtype = 'SolvateOct'
 
-        file.write('addIons APO Cl- 0 \n'
-                   'addIons APO Na+ 0 \n')
+        if self.getEnumText('WaterForceField') == 'tip3p':
+            params += 'charge APO \n {} APO TIP3PBOX {} iso \n'.format(Boxtype, self.Distance.get())
+        elif self.getEnumText('WaterForceField') == 'tip4pew':
+            params += 'charge APO \n {} APO TIP4PEWBOX {} iso \n'.format(Boxtype, self.Distance.get())
+        elif self.getEnumText('WaterForceField') == 'spece':
+            params += 'charge APO \n {} APO SPCEBOX {} iso \n'.format(Boxtype, self.Distance.get())
+        elif self.getEnumText('WaterForceField') == 'opc':
+            params += 'charge APO \n {} APO OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
+        elif self.getEnumText('WaterForceField') == 'opc3':
+            params += 'charge APO \n {} APO OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
 
-        file.write('saveAmberParm APO {}.prmtop {}.crd \n'
-                   'savepdb APO {}_check.pdb \n'
-                   'quit'.format(systemBasename, systemBasename, systemBasename))
+        params += 'addIons APO Cl- 0 \n addIons APO Na+ 0 \n'
+        params += 'saveAmberParm APO {}.prmtop {}.crd \n savepdb APO {}_check.pdb \n' \
+                  'quit'.format(systemBasename, systemBasename, systemBasename)
 
+        file = open(self._getExtraPath("leap_commands.txt"), "w")
+        file.write(params)
         file.close()
 
-        amber.Plugin.runAmbertools(self, 'tleap', params, cwd=self._getPath())
+        amber.Plugin.runAmbertools(self, 'tleap ', "-f extra/leap_commands.txt", cwd=self._getPath())
 
     def createOutputStep(self):
-        pass
+        inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
+        systemBasename = os.path.basename(inputStructure.split(".")[0])
+
+        topol_baseName = '{}.top'.format(systemBasename)
+        crd_baseName = '{}.crd'.format(systemBasename)
+        check_baseName = '{}_check.pdb'.format(systemBasename)
+
+        topol_localPath = abspath(self._getPath(topol_baseName))
+        crd_localPath = abspath(self._getPath(crd_baseName))
+        check_localPath = abspath(self._getPath(check_baseName))
+
+        amber_files = amberobj.AmberSystem(filename=crd_localPath, topoFile=topol_localPath,
+                                           checkFile=check_localPath, ff=self.getEnumText('ProteinForceFieldType'),
+                                           wff=self.getEnumText('WaterForceField'))
+
+        self._defineOutputs(outputSystem=amber_files)
+        self._defineSourceRelation(self.inputStructure, amber_files)
 
     # --------------------------- INFO functions -----------------------------------
 
@@ -259,3 +242,29 @@ class AmberSystemPrep(EMProtocol):
         runOpenBabel(protocol=self, args=args, cwd=self._getTmpPath())
 
         return oFile
+
+    def _summary(self):
+        """ Summarize what the protocol has done"""
+        summary = []
+
+        if self.isFinished():
+            summary.append(
+                "This protocol has created a coordinate file, a topology file and a PDB file (for visualization)"
+                "with the selected Main force fields and Water Force Field")
+
+        else:
+            summary.append("The protocol has not finished.")
+        return summary
+
+    def _methods(self):
+        methods = []
+
+        if self.isFinished():
+            methods.append("This protocol takes a clean pdb file and it uses the "
+                           "AMBER software in order to transform the file into an amber format while applying to it "
+                           'the force fields for the system and the water molecules.\n To do so, it calls the two main'
+                           'preparation programs in AmberTools21: pdb4amber and LEaP. \n'
+                           'Finally, the program LEap returns two files which will be necessary for the MD simulation'
+                           '(.crd and .prmtop files) and a .pdb file to visualize the structure')
+
+        return methods
