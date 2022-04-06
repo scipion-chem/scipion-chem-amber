@@ -52,9 +52,6 @@ class AmberSystemPrep(EMProtocol):
     IMPORT_FROM_FILE = 1
     IMPORT_FROM_SCIPION = 1
 
-    # IMPORT_MDP_FILE = 0
-    # IMPORT_MDP_SCIPION = 1
-
     # -------------------------- DEFINE param functions ----------------------
 
     def __init__(self, **kwargs):
