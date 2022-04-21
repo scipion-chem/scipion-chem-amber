@@ -5,6 +5,7 @@
 # **************************************************************************
 
 from .protocol_system_preparation import AmberSystemPrep
+from .protocol_MD_Simulation import AmberMDSimulation
 
 
 
