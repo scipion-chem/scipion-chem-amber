@@ -142,7 +142,7 @@ class AmberSystemPrep(EMProtocol):
             inputStructure = self.convertPDB(inputStructure)
 
         systemBasename = os.path.basename(inputStructure.split(".")[0])
-        params = '{} > {}.amber.pdb --no-conect'.format(inputStructure, systemBasename)
+        params = '{} > {}.amber.pdb --no-conect '.format(inputStructure, systemBasename)
 
         if self.proteinResidues:
             params += '-p '
@@ -201,7 +201,7 @@ class AmberSystemPrep(EMProtocol):
             params += 'charge APO \n {} APO OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
 
         params += 'addIons APO Cl- 0 \n addIons APO Na+ 0 \n'
-        params += 'saveAmberParm APO {}.prmtop {}.crd \n savepdb APO {}_check.pdb \n' \
+        params += 'saveAmberParm APO {}.top {}.crd \n savepdb APO {}_check.pdb \n' \
                   'quit'.format(systemBasename, systemBasename, systemBasename)
 
         file = open(self._getExtraPath("leap_commands.txt"), "w")

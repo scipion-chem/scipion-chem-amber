@@ -49,7 +49,7 @@ class AmberMDSimulation(EMProtocol):
     """
 
     _label = 'Molecular dynamics simulation'
-    _ensemTypes = ['Energy min', 'NVT', 'NPT']
+    _ensemTypes = ['no periodicity', 'NVT', 'NPT']
 
     _thermostats = ['no', 'Andersen', 'Langevin', 'Nose-Hoover', 'Nose-Hoover RESPA', 'Berendsen']
     _barostats = ['no', 'Berendsen', 'Monte Carlo']
@@ -58,13 +58,13 @@ class AmberMDSimulation(EMProtocol):
     _shakeAlgorithm = ['Shake not performed', 'Bonds involving hydrogens are constrains', 'all bonds are constrained']
 
     _paramNames = ['simTime', 'timeStep', 'timeNeigh', 'saveTrj', 'trajInterval', 'temperature', 'tempRelaxCons',
-                   'tempCouple', 'pressure', 'presRelaxCons', 'presCouple']
-    _enumParamNames = ['integrator', 'ensemType', 'thermostat', 'barostat']
+                   'tempCouple', 'pressure', 'presRelaxCons', 'presCouple', 'EnergyMin']
+    _enumParamNames = ['integrator', 'ensemType', 'thermostat', 'barostat', 'pressureDynamics', 'Shake']
     _defParams = {'simTime': 100, 'timeStep': 0.002, 'timeNeigh': 10, 'saveTrj': False, 'trajInterval': 1.0,
                   'temperature': 300.0, 'tempRelaxCons': 0.1, 'tempCouple': -1, 'integrator': 'md',
                   'pressure': 1.0, 'presRelaxCons': 2.0, 'presCouple': -1, 'restrainForce': 50.0,
                   'ensemType': 'NVT', 'thermostat': 'V-rescale', 'barostat': 'Parrinello-Rahman',
-                  'restrains': 'None'}
+                  'restrains': 'None', 'pressureDynamics': 'anisotropic', 'Shake': 'Shake not performed'}
 
     # -------------------------- DEFINE constants ----------------------------
     def __init__(self, **kwargs):
@@ -100,6 +100,10 @@ class AmberMDSimulation(EMProtocol):
                             'if not, 0.001ps is recommended ')
 
         group = form.addGroup('Ensemble')
+        group.addParam('EnergyMin', params.BooleanParam,
+                       label='Energy Minimization: ', default=True,
+                       help='Whether this step should perform energy minimization')
+
         group.addParam('ensemType', params.EnumParam,
                        label='Simulation type: ',
                        choices=self._ensemTypes, default=0,
@@ -118,7 +122,7 @@ class AmberMDSimulation(EMProtocol):
                                   'Relaxation time constant for barostat (ps)')
         line.addParam('pressure', params.FloatParam, default=1.0,
                       label='   Pressure (bar):   ')
-        line.addParam('pressureDynamics', params.EnumParam, default=2,
+        line.addParam('pressureDynamics', params.EnumParam, default=0,
                       label='  Pressure dynamics type:   ', choices=self._coupleStyle)
         line.addParam('barostat', params.EnumParam, default=1,
                       label='  Barostat type:   ', choices=self._barostats)
@@ -165,21 +169,18 @@ class AmberMDSimulation(EMProtocol):
             msjDic = eval(wStep)
             mdpFile = self.generateMDPFile(msjDic, str(i))
 
-            tprFile = self.callGROMPP(mdpFile)
-            self.callMDRun(tprFile, saveTrj=msjDic['saveTrj'])
+            tprFile = self.callAmber(mdpFile)
+            #self.callMDRun(tprFile, saveTrj=msjDic['saveTrj'])
 
     def createOutputStep(self):
-        lastAmberFile, lastTopoFile, lastTprFile = self.getPrevFinishedStageFiles()
+        lastAmberFile = self.getPrevFinishedStageFiles()
         localAmberFile, localTopFile = self._getPath('outputSystem.nc'), self._getPath('systemTopology.top')
         shutil.copyfile(lastAmberFile, localAmberFile)
-        shutil.copyfile(lastTopoFile, localTopFile)
-
-        outTrj = self.concatTrjFiles(outTrj='outputTrajectory.nc', tprFile=lastTprFile)
+        shutil.copyfile(self.AmberSystem.get().getTopologyFile(), localTopFile)
 
         outSystem = AmberSystem(filename=localAmberFile)
         outSystem.setTopologyFile(localTopFile)
-        if outTrj:
-            outSystem.setTrajectoryFile(outTrj)
+
 
         self._defineOutputs(outputSystem=outSystem)
 
@@ -232,56 +233,7 @@ class AmberMDSimulation(EMProtocol):
 
         return methods
 
-    def _warnings(self):
-        warns = []
-        # Global warnings
-        inpSystem = self.gromacsSystem.get()
-        if str(inpSystem.getForceField()).startswith('gromos'):
-            warns.append('\nStep all : GROMOS force field is not recommended by GROMACS: '
-                         'https://chemrxiv.org/engage/chemrxiv/article-details/60c74701bdbb895afaa38ce2')
-        elif str(inpSystem.getForceField()).startswith('charmm36') and 'CA' in inpSystem.getIons() and \
-                inpSystem.getIons()['CA'] > 20:
-            warns.append('\nStep all : More than 20 non-matching atom names because of (Cal - CA) in charmm36. '
-                         'Cal from topology file will be used')
 
-        prevTrj = False
-        for step, wStep in enumerate(self.workFlowSteps.get().strip().split('\n')):
-            if wStep in ['', None]:
-                msjDic = self.createMSJDic()
-            else:
-                msjDic = eval(wStep)
-
-            if msjDic['ensemType'] == 'NPT' and msjDic['barostat'] != 'Berendsen' and not prevTrj:
-                warns.append(
-                    '\nStep {} : Berendsen is the barostat recommended for system equilibration, {} might not be'
-                    ' the best option for the first trajectory saved'.format(step + 1, msjDic['barostat']))
-            if msjDic['saveTrj']:
-                prevTrj = True
-
-            if msjDic['ensemType'] != 'Energy min':
-                tCoup = msjDic['timeNeigh'] if msjDic['tempCouple'] == -1 else msjDic['tempCouple']
-                if msjDic['thermostat'] == 'Nose-Hoover' and 20 * tCoup * msjDic['timeStep'] > msjDic['tempRelaxCons']:
-                    warns.append('\nStep {} : For proper integration of the Nose-Hoover thermostat, tau-t ({}) should '
-                                 'be at least 20 times larger than nsttcouple*dt ({}*{})'.format(step + 1,
-                                                                                                 msjDic[
-                                                                                                     'tempRelaxCons'],
-                                                                                                 tCoup,
-                                                                                                 msjDic['timeStep']))
-
-        return warns
-
-    def _validate(self):
-        vals = []
-        for step, wStep in enumerate(self.workFlowSteps.get().strip().split('\n')):
-            if wStep in ['', None]:
-                msjDic = self.createMSJDic()
-            else:
-                msjDic = eval(wStep)
-            if msjDic['ensemType'] != 'Energy min':
-                if 'Andersen' in msjDic['thermostat'] and msjDic['integrator'] == 'md':
-                    vals.append(
-                        'Step {} : Andersen temperature control not supported for integrator md.'.format(step + 1))
-        return vals
 
     ######################## UTILS ##################################
     def countSteps(self):
@@ -314,79 +266,98 @@ class AmberMDSimulation(EMProtocol):
     def generateMDPFile(self, msjDic, mdpStage):
         stageDir = self._getExtraPath('stage_{}'.format(mdpStage))
         os.mkdir(stageDir)
-        mdpFile = os.path.join(stageDir, 'stage_{}.mdp'.format(mdpStage))
+        mdpFile = os.path.join(stageDir, 'stage_{}.in'.format(mdpStage))
 
-        params = '&cntrl \n' \
-                 'dt = {},' \
-                 'nstlim = {},'.format(msjDic['timeStep'], msjDic['simTime'])
+        params = '\n &cntrl \n' \
+                 '      dt={},' \
+                 ' nstlim={},'.format(msjDic['timeStep'], int(msjDic['simTime']))
 
-        if msjDic['ensemType'] == 'Energy min':
-            params += 'imin = 1,ntb = 2,'
-        if msjDic['ensemType'] == 'NVT':
-            params += 'imin = 0, ntb = 1,'
-        if msjDic['ensemType'] == 'NPT':
-            params += 'imin = 0, ntb = 2,'
+        if msjDic['EnergyMin']:
+            params += ' imin=1,'
+        else:
+            params += ' imin=0,'
+
+        if msjDic['ensemType'] == 'no periodicity':
+            params += ' ntb=0, cut=99'
+        elif msjDic['ensemType'] == 'NVT':
+            params += ' ntb=1,'
+        elif msjDic['ensemType'] == 'NPT':
+            params += ' ntb=2,'
 
         if msjDic['thermostat'] == 'no':
-            params += 'ntt = 0,'
+            params += ' ntt=0,'
         if msjDic['thermostat'] == 'Andersen':
-            params += 'ntt = 2,'
+            params += ' ntt=2,'
         if msjDic['thermostat'] == 'Langevin':
-            params += 'ntt = 3,'
+            params += ' ntt=3,'
         if msjDic['thermostat'] == 'Nose-Hoove':
-            params += 'ntt = 9,'
+            params += ' ntt=9,'
         if msjDic['thermostat'] == 'Nose-Hoover RESPA':
-            params += 'ntt = 10,'
+            params += ' ntt=10,'
         if msjDic['thermostat'] == 'Berendsen':
-            params += 'ntt = 11,'
+            params += ' ntt=11,'
 
-        params += 'temp0 = {}, pres0 = {},'.format(msjDic['temperature'], msjDic['pressure'])
+        params += ' temp0={}, pres0={},'.format(msjDic['temperature'], msjDic['pressure'])
 
         if msjDic['barostat'] == 'Berendsen':
-            params += 'barostat = 1,'
+            params += ' barostat=1,'
         elif msjDic['barostat'] == 'Monte Carlo':
-            params += 'barostat = 2,'
+            params += ' barostat=2,'
         else:
             params += ''
 
-        if msjDic['pressureDynamic'] == 'No pressure scaling':
-            params += 'ntp = 0,'
-        if msjDic['pressureDynamic'] == 'isotropic':
-            params += 'ntp = 1,'
-        if msjDic['pressureDynamic'] == 'anisotropic':
-            params += 'ntp = 2,'
-        if msjDic['pressureDynamic'] == 'semiisotropic':
-            params += 'ntp = 3,'
+        if msjDic['ensemType'] == 'NPT':
+
+            if msjDic['pressureDynamics'] == 'isotropic':
+                params += ' ntp=1,'
+            if msjDic['pressureDynamics'] == 'anisotropic':
+                params += ' ntp=2,'
+            if msjDic['pressureDynamics'] == 'semiisotropic':
+                params += ' ntp=3,'
+        else:
+            params += ' ntp=0,'
 
         if msjDic['Shake'] == 'Shake not performed':
-            params += 'ntp = 1,'
+            params += ' ntc=1,'
         if msjDic['Shake'] == 'Bonds involving hydrogens are constrains':
-            params += 'ntp = 2,'
+            params += ' ntc=2,'
         if msjDic['Shake'] == 'all bonds are constrained':
-            params += 'ntp = 3,'
+            params += ' ntc=3,'
 
-        params += '\n &end'
-
+        params += '\n &end \n END'
+        print(msjDic)
         with open(mdpFile, 'w') as f:
             f.write(params)
 
         return mdpFile
 
     def callAmber(self, mdpFile):
+        inputStructure = os.path.abspath(self.AmberSystem.get().getFileName())
+        systemBasename = os.path.basename(inputStructure.split(".")[0])
+
+
         stageDir = os.path.dirname(mdpFile)
         stage = os.path.split(stageDir)[-1]
         stageNum = stage.replace('stage_', '').strip()
-        amberFile, topFile, _ = self.getPrevFinishedStageFiles(stage)
+        amberFile = self.getPrevFinishedStageFiles(stage)
         outFile = '{}.in'.format(stage)
         topFile = self.AmberSystem.get().getTopologyFile()
-        crdFile = self.AmberSystem.get().getfilename()
+        crdFile = self.AmberSystem.get().getSystemFile()
 
         if self.checkIfPrevTrj(stageNum):
             prevTrjStr = '-t ' + os.path.abspath(self.checkIfPrevTrj(stageNum))
         else:
             prevTrjStr = ''
+        print(systemBasename)
 
-        command = '-i {} -c {} -p {}'.format(outFile, crdFile, topFile)
+
+        command = '-i {} -c {} -p {} -r {}.r \
+                                       -o {}.o \
+                                       -x {}.1.x \
+                                       -e {}.1.e \
+                                       -ref {}.crd \
+                                       -inf min.inf'.format(outFile, amberFile, topFile, *[systemBasename]*5)
+
         # Manage warnings
         nWarns = self.countWarns(stageNum)
         print('{} warnings in stage {}'.format(nWarns, stageNum))
@@ -400,29 +371,25 @@ class AmberMDSimulation(EMProtocol):
     def getPrevFinishedStageFiles(self, stage=None, reverse=False):
         '''Return the previous .gro and topology files if number stage is provided.
         If not, returns the ones of the lastest stage'''
-        topFile = self.AmberSystem.get().getTopologyFile()
+        print(stage)
         if stage:
             stageNum = stage.replace('stage_', '').strip()
             if stageNum == '1':
-                groFile = os.path.abspath(self.AmberSystem.get().getSystemFile())
-                tprFile = None
+                amberFile = os.path.abspath(self.AmberSystem.get().getSystemFile())
 
             else:
                 prevDir = self._getExtraPath('stage_{}'.format(int(stageNum) - 1))
                 for file in os.listdir(prevDir):
-                    if '.gro' in file:
-                        groFile = os.path.join(prevDir, file)
-                    elif '.tpr' in file:
-                        tprFile = os.path.join(prevDir, file)
+                    if '.r' in file:
+                        amberFile = os.path.join(prevDir, file)
+
         else:
             stageDirs = natural_sort(glob.glob(self._getExtraPath('stage_*')), rev=reverse)
             for file in os.listdir(stageDirs[-1]):
-                if '.gro' in file:
-                    groFile = os.path.join(stageDirs[-1], file)
-                elif '.tpr' in file:
-                    tprFile = os.path.join(stageDirs[-1], file)
+                if '.r' in file:
+                    amberFile = os.path.join(stageDirs[-1], file)
 
-        return os.path.abspath(groFile), os.path.abspath(topFile), tprFile
+        return os.path.abspath(amberFile)
 
     def checkIfPrevTrj(self, stageNum):
         if stageNum == '1':

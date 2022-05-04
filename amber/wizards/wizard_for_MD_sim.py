@@ -34,7 +34,7 @@ information such as name and number of residues.
 
 # Imports
 from ..protocols import AmberMDSimulation
-from ..protocols.protocol_MD_simulation import *
+from ..protocols.protocol_MD_Simulation import *
 import pyworkflow.wizard as pwizard
 from pwchem.wizards import AddElementWizard, DeleteElementWizard
 
@@ -70,6 +70,8 @@ class AmberWatchRelaxStepWizard(pwizard.Wizard):
                         idx = protocol._thermostats.index(msjDic[pName])
                     elif pName == 'barostat':
                         idx = protocol._barostats.index(msjDic[pName])
+                    elif pName == 'Shake':
+                        idx = protocol._shakeAlgorithm.index(msjDic[pName])
                     elif pName == 'coupleStyle':
                         idx = protocol._coupleStyle.index(msjDic[pName])
                     elif pName == 'restrains':
