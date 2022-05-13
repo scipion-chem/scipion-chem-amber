@@ -27,8 +27,7 @@ import os, glob, subprocess
 import pyworkflow.viewer as pwviewer
 from pyworkflow.protocol import params
 from pwchem.viewers import VmdViewPopen
-from pwem.objects import SetOfAtomStructs, AtomStruct
-from pwem.viewers import ChimeraViewer
+
 
 from pwchem.viewers import PyMolViewer, PyMolView
 from pwchem.utils import natural_sort
@@ -37,6 +36,8 @@ from amber import Plugin
 from ..objects import AmberSystem
 from ..protocols import AmberMDSimulation
 from ..constants import *
+
+program = Plugin.getEnviron_amber()
 
 
 class AmberSystemViewer(pwviewer.Viewer):
@@ -55,6 +56,8 @@ class AmberMDSimulationViewer(pwviewer.ProtocolViewer):
     ''' Visualize the trajectory output'''
     _label = 'Viewer AMBER Simulation'
     _targets = [AmberMDSimulation]
+    _environments = [pwviewer.DESKTOP_TKINTER]
+
 
     def __init__(self, **args):
         super().__init__(**args)
@@ -79,13 +82,12 @@ class AmberMDSimulationViewer(pwviewer.ProtocolViewer):
 
     def _showMdVMD(self, paramName=None):
         stage = self.getEnumText('chooseStage')
-        _, trjFile = self.getStageFiles(stage)
-        system = self.protocol.outputSystem
-        topFile = self.AmberSystem.get().getTopologyFile()
+        trjFile = self.getStageFiles(stage)
+        topFile = self.protocol.outputSystem.getTopologyFile()
 
-        params = 'mol addrep 0' \
-                 'mol new s%ds type {parm7} first 0 last -1 step 1 waitfor 1' \
-                 'mol addfile s%ds type {netcdf} first 0 last -1 step 1 waitfor 1 0' % (topFile, trjFile)
+        params = 'mol addrep 0 \n' \
+                 'mol new %s type {parm7} first 0 last -1 step 1 waitfor 1 \n' \
+                 'mol addfile %s type {netcdf} first 0 last -1 step 1 waitfor 1 0' % (os.path.abspath(topFile), os.path.abspath(trjFile))
 
         outTcl = self.protocol._getExtraPath('vmdSimulation.tcl')
         with open(outTcl, 'w') as f:
@@ -94,6 +96,8 @@ class AmberMDSimulationViewer(pwviewer.ProtocolViewer):
 
         return [VmdViewPopen(args)]
 
+
+
     ################################# UTILS #########################
 
     def _getStagesWTrj(self):
@@ -101,17 +105,15 @@ class AmberMDSimulationViewer(pwviewer.ProtocolViewer):
         stages = ['All']
         for stDir in natural_sort(glob.glob(self.protocol._getExtraPath('stage_*'))):
             stage = os.path.basename(stDir)
-            trjFile = '{}/{}.trr'.format(stDir, stage)
+            trjFile = '{}/{}.nc'.format(stDir, stage)
             if os.path.exists(trjFile):
                 stages.append(stage)
         return stages
 
     def getStageFiles(self, stage):
         if stage == 'All':
-            _, _, tprFile = self.protocol.getPrevFinishedStageFiles(reverse=True)
             trjFile = self.protocol._getPath('outputTrajectory.nc')
         else:
-            _, _, tprFile = self.protocol.getPrevFinishedStageFiles(stage)
-            trjFile = self.protocol._getExtraPath('{}/{}_corrected.nc'.format(stage, stage))
+            trjFile = self.protocol._getExtraPath('{}/{}.nc'.format(stage, stage))
 
-        return tprFile, trjFile
+        return trjFile

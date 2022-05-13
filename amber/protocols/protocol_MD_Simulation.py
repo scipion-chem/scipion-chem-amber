@@ -127,9 +127,9 @@ class AmberMDSimulation(EMProtocol):
         line.addParam('barostat', params.EnumParam, default=1,
                       label='  Barostat type:   ', choices=self._barostats)
         line = group.addLine('SHAKE algorithm : ', help='In SHAKE algorithm, the system of non-linear constraint '
-                                                         'equations is solved using the Gauss–Seidel method which '
-                                                         'approximates the solution of the linear system of equations '
-                                                         'using the Newton–Raphson method ')
+                                                        'equations is solved using the Gauss–Seidel method which '
+                                                        'approximates the solution of the linear system of equations '
+                                                        'using the Newton–Raphson method ')
         line.addParam('Shake', params.EnumParam, default=0,
                       label='SHAKE algortihm: ', choices=self._shakeAlgorithm)
 
@@ -170,17 +170,22 @@ class AmberMDSimulation(EMProtocol):
             mdpFile = self.generateMDPFile(msjDic, str(i))
 
             tprFile = self.callAmber(mdpFile)
-            #self.callMDRun(tprFile, saveTrj=msjDic['saveTrj'])
+            # self.callMDRun(tprFile, saveTrj=msjDic['saveTrj'])
 
     def createOutputStep(self):
-        lastAmberFile = self.getPrevFinishedStageFiles()
-        localAmberFile, localTopFile = self._getPath('outputSystem.nc'), self._getPath('systemTopology.top')
-        shutil.copyfile(lastAmberFile, localAmberFile)
+        CrdAmberFile, localTopFile = self._getPath('CrdFile.crd'), self._getPath('systemTopology.top')
+
+        shutil.copyfile(self.AmberSystem.get().getSystemFile(), CrdAmberFile)
         shutil.copyfile(self.AmberSystem.get().getTopologyFile(), localTopFile)
 
-        outSystem = AmberSystem(filename=localAmberFile)
-        outSystem.setTopologyFile(localTopFile)
+        outTrj = self.getTrjFiles()
+        outputTrajectory = self._getPath('outputTrajectory.nc')
+        shutil.copyfile(outTrj[-1], outputTrajectory)
 
+        outSystem = AmberSystem(filename=CrdAmberFile)
+        outSystem.setTopologyFile(localTopFile)
+        if outTrj:
+            outSystem.setTrajectoryFile(outputTrajectory)
 
         self._defineOutputs(outputSystem=outSystem)
 
@@ -233,8 +238,6 @@ class AmberMDSimulation(EMProtocol):
 
         return methods
 
-
-
     ######################## UTILS ##################################
     def countSteps(self):
         stepsStr = self.summarySteps.get() if self.summarySteps.get() is not None else ''
@@ -270,7 +273,8 @@ class AmberMDSimulation(EMProtocol):
 
         params = '\n &cntrl \n' \
                  '      dt={},' \
-                 ' nstlim={},'.format(msjDic['timeStep'], int(msjDic['simTime']))
+                 ' nstlim={}, ntwr=50, ntwx=50, ntwe=50, '.format(msjDic['timeStep'],
+                                                                  int(msjDic['simTime'] / msjDic['timeStep']))
 
         if msjDic['EnergyMin']:
             params += ' imin=1,'
@@ -331,10 +335,9 @@ class AmberMDSimulation(EMProtocol):
 
         return mdpFile
 
-    def callAmber(self, mdpFile):
+    def callAmber(self, mdpFile, saveTrj=True):
         inputStructure = os.path.abspath(self.AmberSystem.get().getFileName())
         systemBasename = os.path.basename(inputStructure.split(".")[0])
-
 
         stageDir = os.path.dirname(mdpFile)
         stage = os.path.split(stageDir)[-1]
@@ -348,15 +351,13 @@ class AmberMDSimulation(EMProtocol):
             prevTrjStr = '-t ' + os.path.abspath(self.checkIfPrevTrj(stageNum))
         else:
             prevTrjStr = ''
-        print(systemBasename)
-
 
         command = '-i {} -c {} -p {} -r {}.r \
                                        -o {}.o \
-                                       -x {}.1.x \
+                                       -x {}.1.nc \
                                        -e {}.1.e \
                                        -ref {}.crd \
-                                       -inf min.inf'.format(outFile, amberFile, topFile, *[systemBasename]*5)
+                                       -inf min.inf'.format(outFile, amberFile, topFile, *[stage] * 5)
 
         # Manage warnings
         nWarns = self.countWarns(stageNum)
@@ -365,8 +366,11 @@ class AmberMDSimulation(EMProtocol):
             command += ' -maxwarn {}'.format(nWarns)
 
         amberPlugin.runAmbertools(self, 'sander -O ', command, cwd=stageDir)
-        return os.path.join(stageDir, outFile)
+        if not saveTrj:
+            trjFile = os.path.join(stageDir, '{}.trr'.format(stage))
+            os.remove(trjFile)
 
+        return os.path.join(stageDir, outFile)
 
     def getPrevFinishedStageFiles(self, stage=None, reverse=False):
         '''Return the previous .gro and topology files if number stage is provided.
@@ -397,7 +401,7 @@ class AmberMDSimulation(EMProtocol):
         else:
             prevDir = self._getExtraPath('stage_{}'.format(int(stageNum) - 1))
             for file in os.listdir(prevDir):
-                if '.cpt' in file:
+                if '.nc' in file:
                     return os.path.join(prevDir, file)
         return False
 
@@ -407,7 +411,7 @@ class AmberMDSimulation(EMProtocol):
         for sDir in stagesDirs:
             cont = False
             for file in os.listdir(sDir):
-                if '.trr' in file:
+                if '.nc' in file:
                     trjFiles.append(os.path.abspath(os.path.join(sDir, file)))
                     cont = True
             if not cont:
@@ -415,8 +419,6 @@ class AmberMDSimulation(EMProtocol):
 
         trjFiles.reverse()
         return trjFiles
-
-
 
     def countWarns(self, stageNum):
         nWarns = 0
