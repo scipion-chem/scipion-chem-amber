@@ -354,8 +354,8 @@ class AmberMDSimulation(EMProtocol):
 
         command = '-i {} -c {} -p {} -r {}.r \
                                        -o {}.o \
-                                       -x {}.1.nc \
-                                       -e {}.1.e \
+                                       -x {}.nc \
+                                       -e {}.e \
                                        -ref {}.crd \
                                        -inf min.inf'.format(outFile, amberFile, topFile, *[stage] * 5)
 

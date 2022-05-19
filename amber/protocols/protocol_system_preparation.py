@@ -36,9 +36,11 @@ from pyworkflow.protocol import params
 from pyworkflow.utils import Message
 
 import amber
+from amber import Plugin as amberPlugin
 from pwchem.utils import runOpenBabel
 
 import amber.objects as amberobj
+from amber.objects import *
 
 
 class AmberSystemPrep(EMProtocol):
@@ -55,7 +57,8 @@ class AmberSystemPrep(EMProtocol):
     # -------------------------- DEFINE param functions ----------------------
 
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
+        EMProtocol.__init__(self, **kwargs)
+
 
     def _defineParams(self, form):
         """
@@ -67,6 +70,10 @@ class AmberSystemPrep(EMProtocol):
                       label="Input structure:", allowsNull=False,
                       important=True, pointerClass='AtomStruct',
                       help='Atom structure to convert to Amber system')
+        form.addParam('AmberSystem', params.PointerParam,
+                      label="Ligand structure:", allowsNull=True,
+                      important=True, pointerClass='AmberSystem',
+                      help='Ligand structure to convert to Amber system')
 
         group = form.addGroup('pdb4amber options')
         group.addParam('proteinResidues', params.BooleanParam, default=False,
@@ -160,6 +167,7 @@ class AmberSystemPrep(EMProtocol):
     def ForceFieldStep(self):
         inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
         systemBasename = os.path.basename(inputStructure.split(".")[0])
+
         params = '\n'
 
         if self.ProteinForceField:
@@ -177,6 +185,16 @@ class AmberSystemPrep(EMProtocol):
 
         params += 'APO = loadPdb {}.amber.pdb \n'.format(systemBasename)
 
+        if self.AmberSystem == True:
+
+            missingFile = self.AmberSystem.get().getMissingFile()
+            libFile = self.AmberSystem.get().getLibFile()
+            originFile = self.AmberSystem.get().getOriginFile()
+
+            params += 'loadamberparams {} \n' \
+                      'loadOff {} \n' \
+                      'LIG = loadPdb {} \n'.format(missingFile, libFile, originFile)
+
         if self.DisulfideBridges:
 
             for pair in self.DisulfideBridgesNumber.get().split('/'):
@@ -184,29 +202,57 @@ class AmberSystemPrep(EMProtocol):
                 second = pair.split('-')[1]
                 params += 'bond APO.{}.SG APO.{}.SG \n'.format(first, second)
 
-        if self.getEnumText('SolvateStep') == 'Cubic':
-            Boxtype = 'SolvateBox'
+        if self.AmberSystem == True:
+            params += 'COMPL = combine { APO LIG }'
+
+            if self.getEnumText('SolvateStep') == 'Cubic':
+                Boxtype = 'SolvateBox'
+            else:
+                Boxtype = 'SolvateOct'
+
+            if self.getEnumText('WaterForceField') == 'tip3p':
+                params += 'charge COMPL \n {} COMPL TIP3PBOX {} iso \n'.format(Boxtype, self.Distance.get())
+            elif self.getEnumText('WaterForceField') == 'tip4pew':
+                params += 'charge COMPL \n {} COMPL TIP4PEWBOX {} iso \n'.format(Boxtype, self.Distance.get())
+            elif self.getEnumText('WaterForceField') == 'spece':
+                params += 'charge COMPL \n {} COMPL SPCEBOX {} iso \n'.format(Boxtype, self.Distance.get())
+            elif self.getEnumText('WaterForceField') == 'opc':
+                params += 'charge COMPL \n {} COMPL OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
+            elif self.getEnumText('WaterForceField') == 'opc3':
+                params += 'charge COMPL \n {} COMPL OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
+
+            params += 'addIons COMPL Cl- 0 \n addIons COMPL Na+ 0 \n'
+            params += 'saveAmberParm COMPL {}_complex.top {}_complex.crd \n savepdb COMPL {}_complex_check.pdb \n' \
+                      'quit'.format(systemBasename, systemBasename, systemBasename)
+
+            file = open(self._getExtraPath("leap_commands.txt"), "w")
+            file.write(params)
+            file.close()
+
         else:
-            Boxtype = 'SolvateOct'
+            if self.getEnumText('SolvateStep') == 'Cubic':
+                Boxtype = 'SolvateBox'
+            else:
+                Boxtype = 'SolvateOct'
 
-        if self.getEnumText('WaterForceField') == 'tip3p':
-            params += 'charge APO \n {} APO TIP3PBOX {} iso \n'.format(Boxtype, self.Distance.get())
-        elif self.getEnumText('WaterForceField') == 'tip4pew':
-            params += 'charge APO \n {} APO TIP4PEWBOX {} iso \n'.format(Boxtype, self.Distance.get())
-        elif self.getEnumText('WaterForceField') == 'spece':
-            params += 'charge APO \n {} APO SPCEBOX {} iso \n'.format(Boxtype, self.Distance.get())
-        elif self.getEnumText('WaterForceField') == 'opc':
-            params += 'charge APO \n {} APO OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
-        elif self.getEnumText('WaterForceField') == 'opc3':
-            params += 'charge APO \n {} APO OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
+            if self.getEnumText('WaterForceField') == 'tip3p':
+                params += 'charge APO \n {} APO TIP3PBOX {} iso \n'.format(Boxtype, self.Distance.get())
+            elif self.getEnumText('WaterForceField') == 'tip4pew':
+                params += 'charge APO \n {} APO TIP4PEWBOX {} iso \n'.format(Boxtype, self.Distance.get())
+            elif self.getEnumText('WaterForceField') == 'spece':
+                params += 'charge APO \n {} APO SPCEBOX {} iso \n'.format(Boxtype, self.Distance.get())
+            elif self.getEnumText('WaterForceField') == 'opc':
+                params += 'charge APO \n {} APO OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
+            elif self.getEnumText('WaterForceField') == 'opc3':
+                params += 'charge APO \n {} APO OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
 
-        params += 'addIons APO Cl- 0 \n addIons APO Na+ 0 \n'
-        params += 'saveAmberParm APO {}.top {}.crd \n savepdb APO {}_check.pdb \n' \
-                  'quit'.format(systemBasename, systemBasename, systemBasename)
+            params += 'addIons APO Cl- 0 \n addIons APO Na+ 0 \n'
+            params += 'saveAmberParm APO {}.top {}.crd \n savepdb APO {}_check.pdb \n' \
+                      'quit'.format(systemBasename, systemBasename, systemBasename)
 
-        file = open(self._getExtraPath("leap_commands.txt"), "w")
-        file.write(params)
-        file.close()
+            file = open(self._getExtraPath("leap_commands.txt"), "w")
+            file.write(params)
+            file.close()
 
         amber.Plugin.runAmbertools(self, 'tleap ', "-f extra/leap_commands.txt", cwd=self._getPath())
 

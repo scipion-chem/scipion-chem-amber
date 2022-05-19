@@ -37,7 +37,6 @@ from ..objects import AmberSystem
 from ..protocols import AmberMDSimulation
 from ..constants import *
 
-program = Plugin.getEnviron_amber()
 
 
 class AmberSystemViewer(pwviewer.Viewer):
