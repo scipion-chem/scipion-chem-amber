@@ -91,8 +91,8 @@ class AmberMDSimulation(EMProtocol):
 
         group = form.addGroup('Simulation time')
         group.addParam('simTime', params.FloatParam, default=100,
-                       label='Simulation time (ps):',
-                       help='Total time of the simulation stage (ps)')
+                       label='Simulation time (ns):',
+                       help='Total time of the simulation stage (ns)')
         group.addParam('timeStep', params.FloatParam, default=0.002,
                        label='Simulation time steps (ps)[dt]:',
                        help='Time of the steps for simulation (ps)[dt] \n 0.002ps is recommended if SHAKE '
@@ -211,13 +211,13 @@ class AmberMDSimulation(EMProtocol):
                     msjDic = eval(dicLine)
                     msjDic = self.addDefaultForMissing(msjDic)
                     method, ensemType = msjDic['thermostat'], msjDic['ensemType']
-                    sumStr += '{}) Sim. time ({}): {} ps, {} ensemble'. \
+                    sumStr += '{}) Sim. time ({}): {} ns, {} ensemble'. \
                         format(i + 1, msjDic['integrator'], msjDic['simTime'], ensemType)
                     sumStr += ', {} K\n'.format(msjDic['temperature'])
         else:
             msjDic = self.addDefaultForMissing(msjDic)
             method, ensemType = msjDic['thermostat'], msjDic['ensemType']
-            sumStr += 'Sim. time ({}): {} ps, {} ensemble'. \
+            sumStr += 'Sim. time ({}): {} ns, {} ensemble'. \
                 format(msjDic['simTime'], msjDic['integrator'], ensemType, method)
             sumStr += ', {} K\n'.format(msjDic['temperature'])
         return sumStr
@@ -233,8 +233,7 @@ class AmberMDSimulation(EMProtocol):
         methods = []
 
         if self.isFinished():
-            methods.append('The methods used to perform the energy minimization protocol have been *"gmx grompp"* to '
-                           'create the tpr files and *"gmx mdrun"* to run the minimization simulation.')
+            methods.append('The methods used to perform the ')
 
         return methods
 
@@ -346,6 +345,7 @@ class AmberMDSimulation(EMProtocol):
         outFile = '{}.in'.format(stage)
         topFile = self.AmberSystem.get().getTopologyFile()
         crdFile = self.AmberSystem.get().getSystemFile()
+        print(stageDir)
 
         if self.checkIfPrevTrj(stageNum):
             prevTrjStr = '-t ' + os.path.abspath(self.checkIfPrevTrj(stageNum))

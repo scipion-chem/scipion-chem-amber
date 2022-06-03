@@ -29,6 +29,7 @@ This module will extract the ligand from a complex pdb.
 """
 
 import glob
+from pwem.convert.atom_struct import toPdb
 from pyworkflow.utils.path import copyFile
 from pwchem.objects import SmallMolecule, SetOfSmallMolecules
 from pyworkflow.protocol import params
@@ -42,11 +43,52 @@ import csv
 import pyworkflow.object as pwobj
 from pwchem.utils import clean_PDB
 
+from os.path import relpath, abspath
+
+import os
+
+from pwem.protocols import EMProtocol, ProtImportFiles
+from pyworkflow.protocol import params, protocol
+from pyworkflow.utils import Message
+
+import amber
+from amber import Plugin as amberPlugin
+from pwchem.utils import runOpenBabel
+
+import amber.objects as amberobj
+from amber.objects import *
+
+import os
+from Bio.PDB import PDBParser, PDBIO, Select
+
 scriptName = 'extract_ligand_script.py'
+
+
+def is_het(residue):
+    res = residue.id[0]
+    return res != " " and res != "W"
+
+
+class ResidueSelect(Select):
+    def __init__(self, chain, residue):
+        self.chain = chain
+        self.residue = residue
+
+    def accept_chain(self, chain):
+        return chain.id == self.chain.id
+
+    def accept_residue(self, residue):
+        """ Recognition of heteroatoms - Remove water molecules """
+        return residue == self.residue and is_het(residue)
+
 
 class ExtractStructures(EMProtocol):
     _label = 'Extract Ligand'
+    IMPORT_FROM_ID = 0
+    IMPORT_FROM_FILES = 1
 
+    def __init__(self, **kwargs):
+        EMProtocol.__init__(self, **kwargs)
 
     def _defineParams(self, form):
         form.addSection(label='Input')
@@ -55,31 +97,57 @@ class ExtractStructures(EMProtocol):
                       label="Input structure:", allowsNull=False,
                       important=True, pointerClass='AtomStruct',
                       help='Atom structure from which you want to extract a ligand')
+
     # --------------------------- Steps functions --------------------
 
     def _insertAllSteps(self):
-        self._insertFunctionStep('ExtractStep')
         self._insertFunctionStep('CreateOutputStep')
 
-    def extractStep(self):
-        inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
-        systemBasename = os.path.basename(inputStructure.split(".")[0])
-
-        params = '{}.pdb'.format(systemBasename)
-        Plugin.runRDKitScript(self, scriptName, params, cwd=self._getPath())
 
     def CreateOutputStep(self):
         inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
+        if not inputStructure.endswith('.pdb'):
+            inputStructure = self.convertPDB(inputStructure)
         systemBasename = os.path.basename(inputStructure.split(".")[0])
 
-        outputSmallMolecules = SetOfSmallMolecules().create(outputPath=self._getPath())
+        ligandFiles = self.extract_ligands(inputStructure)
 
+        outputSet = SetOfSmallMolecules().create(outputPath=self._getPath(), suffix='SmallMols')
+        for lFile in ligandFiles:
+            oMol = SmallMolecule(smallMolFilename=lFile)
+            outputSet.append(oMol)
+        self._defineOutputs(outputSmallMolecules=outputSet)
 
+    # --------------------------- INFO functions -----------------------------------
 
+    def convertPDB(self, proteinFile):
+        inName, inExt = os.path.splitext(os.path.basename(proteinFile))
+        oFile = os.path.abspath(os.path.join(self._getExtraPath(inName + '.pdb')))
+        oFile = toPdb(os.path.abspath(proteinFile), oFile)
 
+        return oFile
 
+    def extract_ligands(self, inputStructure):
+        """ Extraction of the heteroatoms of .pdb files """
+        SmallMolList = []
+        i = 0
+        pdb_code = inputStructure[:-4].split('/')[-1]
+        print(pdb_code)
+        print(inputStructure)
+        pdb = PDBParser().get_structure(pdb_code, inputStructure)
+        print(pdb)
+        io = PDBIO()
+        io.set_structure(pdb)
+        for model in pdb:
+            for chain in model:
+                for residue in chain:
+                    if not is_het(residue):
+                        continue
+                    print(f"saving {chain} {residue}")
+                    molFile = self._getExtraPath(f"lig_{pdb_code}_{i}.pdb")
+                    io.save(molFile, ResidueSelect(chain, residue))
+                    i += 1
 
+                    SmallMolList.append(molFile)
 
-
-
-
+        return SmallMolList
