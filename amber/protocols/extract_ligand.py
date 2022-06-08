@@ -66,7 +66,7 @@ class ExtractStructures(EMProtocol):
         systemBasename = os.path.basename(inputStructure.split(".")[0])
 
         params = '{}.pdb'.format(systemBasename)
-        Plugin.runRDKitScript(self, scriptName, params, cwd=self._getPath())
+        Plugin.runScript(self, scriptName, params, env='rdkit', cwd=self._getPath())
 
     def CreateOutputStep(self):
         inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
