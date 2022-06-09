@@ -189,7 +189,7 @@ using the pdb4amber and Antechamber programs from AMEBERTOOLS
         crd_baseName = '{}.LIG.crd'.format(systemBasename)
         lib_baseName = '{}.LIG.lib'.format(systemBasename)
         origin_baseName = '{}.LIG.pdb'.format(systemBasename)
-        check_baseName = '{}.check.pdb'.format(systemBasename)
+        check_baseName = '{}_checkLIG.pdb'.format(systemBasename)
         missingparams_baseName = '{}.LIG.frcmod'.format(systemBasename)
 
         topol_localPath = abspath(self._getPath(topol_baseName))
@@ -199,9 +199,9 @@ using the pdb4amber and Antechamber programs from AMEBERTOOLS
         check_localPath = abspath(self._getPath(check_baseName))
         missingparams_localPath = abspath(self._getPath(missingparams_baseName))
 
-        amber_files = amberobj.AmberSystem(filename=crd_localPath, topoFile=topol_localPath,
-                                           libFile=lib_localPath, originFile=origin_localPath,
-                                           checkFile=check_localPath, missingFile=missingparams_localPath)
+        amber_files = amberobj.AmberSystem(fileLIGname=crd_localPath, topoLIGFile=topol_localPath,
+                                           libFile=lib_localPath, originLIGFile=origin_localPath,
+                                           checkLIGFile=check_localPath, missingFile=missingparams_localPath)
 
         self._defineOutputs(outputSystem=amber_files)
         self._defineSourceRelation(self.inputStructure, amber_files)
