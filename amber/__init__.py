@@ -1,6 +1,6 @@
 # **************************************************************************
 # *
-# * Authors:     Aida Pinacho (you@yourinstitution.email)
+# * Authors:     Aida Pinacho
 # *
 # * Biocomputing Unit, CNB-CSIC
 # *
@@ -23,31 +23,74 @@
 # *  e-mail address 'scipion@cnb.csic.es'
 # *
 # **************************************************************************
+
 import pwem
-import pwchem
-import pyworkflow
 
-import pyworkflow
+from pyworkflow import join
 
-from amber.constants import AMBER_HOME, V2022, AMBER
+from amber.constants import AMBER_HOME, V2020, AMBER, AMBER_DEFAULT_VERSION
+from pwem.convert.atom_struct import getEnviron
 
 _logo = "icon.png"
-_references = ['you2019']
+_references = ['Salomon-Ferrer2013']
 
 
-class Plugin(pwchem.Plugin):
+class Plugin(pwem.Plugin):
     _homeVar = AMBER_HOME
     _pathVars = [AMBER_HOME]
-    _supportedVersions = [V2022]
-    _gromacsName = AMBER + '-' + AMBER_DEFAULT_VERSION
+    _supportedVersions = [V2020]
+    _amberName = 'ambertools-21'
     _pluginHome = join(pwem.Config.EM_ROOT, _amberName)
+    _Ambertools21Env = "Ambertools21"
 
     @classmethod
     def _defineVariables(cls):
         """ Return and write a variable in the config file.
         """
         cls._defineEmVar(AMBER_HOME, cls._amberName)
+        cls._defineVar("AMBERTOOLS_ENV_ACTIVATION", 'conda activate %s' % cls._Ambertools21Env)
+
+    @classmethod
+    def getAmbertoolsEnvActivation(cls):
+        activation = cls.getVar("AMBERTOOLS_ENV_ACTIVATION")
+        return activation
+
+    @classmethod
+    def defineBinaries(cls, env, default=False):
+        # Creating a new conda enviroment for Ambertools21
+        AMBER_INSTALLED = '%s_installed' % AMBER
+        ambertools_commands = 'conda create -y -n %s && ' % cls._Ambertools21Env
+        ambertools_commands += '%s %s && ' % (cls.getCondaActivationCmd(), cls.getAmbertoolsEnvActivation())
+        ambertools_commands += 'conda install -y -c conda-forge ambertools=21 compilers && '
+        ambertools_commands += 'touch {}'.format(AMBER_INSTALLED)  # Flag installation finished
+
+        ambertools_commands = [(ambertools_commands, AMBER_INSTALLED)]
+        env.addPackage('ambertools', version='21',
+                       tar='void.tgz',
+                       commands=ambertools_commands,
+                       default=True)
+
+    @classmethod
+    def runAmbertools(cls, protocol, program, args, cwd=None):
+        """ Run Ambertools command from a given protocol. """
+        fullProgram = '%s %s && %s' % (cls.getCondaActivationCmd(), cls.getAmbertoolsEnvActivation(), program)
+        protocol.runJob(fullProgram, args, env=cls.getEnviron_amber(), cwd=cwd)
+
+
+    @classmethod
+    def runAmberPrintf(cls, protocol, program, printfValues, args, cwd=None):
+        """ Run Ambertools command from a given protocol. """
+        AmberPath = join(cls._pluginHome, 'bin/{}'.format(program))
+        program = 'printf "{}\n" | {}'.format('\n'.join(printfValues), AmberPath)
+        protocol.runJob(program, args, cwd=cwd)
 
 
 
+    @classmethod  # Test that
+    def getEnviron_amber(cls):
+        pass
 
+    # ---------------------------------- Utils functions  -----------------------
+    @classmethod
+    def runAmber(cls, self, param, params, cwd):
+        pass
