@@ -101,10 +101,10 @@ class ExtractStructures(EMProtocol):
     # --------------------------- Steps functions --------------------
 
     def _insertAllSteps(self):
-        self._insertFunctionStep('CreateOutputStep')
+        self._insertFunctionStep('createOutputStep')
 
 
-    def CreateOutputStep(self):
+    def createOutputStep(self):
         inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
         if not inputStructure.endswith('.pdb'):
             inputStructure = self.convertPDB(inputStructure)
@@ -114,7 +114,7 @@ class ExtractStructures(EMProtocol):
 
         outputSet = SetOfSmallMolecules().create(outputPath=self._getPath(), suffix='SmallMols')
         for lFile in ligandFiles:
-            oMol = SmallMolecule(smallMolFilename=lFile)
+            oMol = SmallMolecule(smallMolFilename=lFile, molName='guess')
             outputSet.append(oMol)
         self._defineOutputs(outputSmallMolecules=outputSet)
 

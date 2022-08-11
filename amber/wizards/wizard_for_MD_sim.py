@@ -36,9 +36,9 @@ information such as name and number of residues.
 from ..protocols import AmberMDSimulation
 from ..protocols.protocol_MD_Simulation import *
 import pyworkflow.wizard as pwizard
-from pwchem.wizards import AddElementWizard, DeleteElementWizard
+from pwchem.wizards import AddElementSummaryWizard, DeleteElementWizard
 
-AddElementWizard().addTarget(protocol=AmberMDSimulation,
+AddElementSummaryWizard().addTarget(protocol=AmberMDSimulation,
                              targets=['insertStep'],
                              inputs=['insertStep'],
                              outputs=['workFlowSteps', 'summarySteps'])
