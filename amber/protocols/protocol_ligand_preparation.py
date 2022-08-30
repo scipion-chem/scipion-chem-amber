@@ -29,14 +29,14 @@ This module will prepare the ligand for the simulation.
 """
 from os.path import relpath, abspath
 
-import os
+import os, shutil
 
 from pwem.protocols import EMProtocol
 from pyworkflow.protocol import params
 from pyworkflow.utils import Message
 
 import amber
-from pwchem.utils import runOpenBabel
+from pwchem.utils import *
 
 import amber.objects as amberobj
 
@@ -49,8 +49,6 @@ using the pdb4amber and Antechamber programs from AMEBERTOOLS
 
 
     _label = 'Ligand preparation'
-    IMPORT_FROM_FILE = 1
-    IMPORT_FROM_SCIPION = 1
 
     _ChargeModel = ['RESP', 'AM1-BCC', 'CM1', 'CM2', 'ESP', 'Mulliken', 'Gasteiger',]
     _Status = ['brief', 'default', 'verbose']
@@ -69,10 +67,12 @@ using the pdb4amber and Antechamber programs from AMEBERTOOLS
         """
         form.addSection(label=Message.LABEL_INPUT)
 
-        form.addParam('inputStructure', params.PointerParam,
-                      label="Input structure:", allowsNull=False,
-                      important=True, pointerClass='AtomStruct',
-                      help='Atom structure to convert to Amber system')
+        form.addParam('inputSetOfMols', params.PointerParam, pointerClass='SetOfSmallMolecules',
+                      label='Input set of molecules:', allowsNull=False,
+                      help='Input set of docked molecules. One of them will be prepared together with its target')
+        form.addParam('inputLigand', params.StringParam,
+                      label='Ligand to prepare: ',
+                      help='Specific ligand to prepare in the system')
 
         group = form.addGroup('pdb4amber options')
         group.addParam('proteinResidues', params.BooleanParam, default=False,
@@ -99,17 +99,20 @@ using the pdb4amber and Antechamber programs from AMEBERTOOLS
 
     def _insertAllSteps(self):
         # Insert processing steps
-        self._insertFunctionStep('PrepStep')
-        self._insertFunctionStep('AntechamberStep')
-        self._insertFunctionStep('ParmStep')
-        self._insertFunctionStep('LeapStep')
+        self._insertFunctionStep('prepStep')
+        self._insertFunctionStep('antechamberStep')
+        self._insertFunctionStep('parmStep')
+        self._insertFunctionStep('leapStep')
         self._insertFunctionStep('createOutputStep')
 
 
-    def PrepStep(self):
-        inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
-        if not inputStructure.endswith('.pdb'):
-            inputStructure = self.convertPDB(inputStructure)
+    def prepStep(self):
+        ligandFile = self.getInputFile()
+        inputStructure = self.getConvFile(getBaseFileName(ligandFile))
+        if not ligandFile.endswith('.pdb'):
+            inputStructure = self.convertPDB(ligandFile)
+        else:
+            shutil.copy(ligandFile, inputStructure)
 
         systemBasename = os.path.basename(inputStructure.split(".")[0])
         params = '{} > {}.LIG.pdb --no-conect '.format(inputStructure, systemBasename)
@@ -127,9 +130,8 @@ using the pdb4amber and Antechamber programs from AMEBERTOOLS
 
         amber.Plugin.runAmbertools(self, 'pdb4amber', params, cwd=self._getPath())
 
-    def AntechamberStep(self):
-        inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
-        systemBasename = os.path.basename(inputStructure.split(".")[0])
+    def antechamberStep(self):
+        systemBasename = self.getInputBaseName()
 
         params = ' -i {}.LIG.pdb -fi pdb -o {}.LIG.mol2 -fo mol2 '.format(*[systemBasename]*2)
 
@@ -157,14 +159,13 @@ using the pdb4amber and Antechamber programs from AMEBERTOOLS
 
         amber.Plugin.runAmbertools(self, 'antechamber', params, cwd=self._getPath())
 
-    def ParmStep(self):
-        inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
-        systemBasename = os.path.basename(inputStructure.split(".")[0])
+    def parmStep(self):
+        systemBasename = self.getInputBaseName()
         params = '-i {}.LIG.mol2 -o {}.LIG.frcmod -f mol2 '.format(*[systemBasename]*2)
 
         amber.Plugin.runAmbertools(self, 'parmchk2', params, cwd=self._getPath())
 
-    def LeapStep(self):
+    def leapStep(self):
         inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
         systemBasename = os.path.basename(inputStructure.split(".")[0])
         params = 'source leaprc.gaff \n' \
@@ -183,8 +184,8 @@ using the pdb4amber and Antechamber programs from AMEBERTOOLS
 
 
     def createOutputStep(self):
-        inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
-        systemBasename = os.path.basename(inputStructure.split(".")[0])
+        systemBasename = self.getInputBaseName()
+
         topol_baseName = '{}.LIG.top'.format(systemBasename)
         crd_baseName = '{}.LIG.crd'.format(systemBasename)
         lib_baseName = '{}.LIG.lib'.format(systemBasename)
@@ -199,18 +200,18 @@ using the pdb4amber and Antechamber programs from AMEBERTOOLS
         check_localPath = abspath(self._getPath(check_baseName))
         missingparams_localPath = abspath(self._getPath(missingparams_baseName))
 
-        amber_files = amberobj.AmberSystem(fileLIGname=crd_localPath, topoLIGFile=topol_localPath,
+        amber_system = amberobj.AmberSystem(fileLIGname=crd_localPath, topoLIGFile=topol_localPath,
                                            libFile=lib_localPath, originLIGFile=origin_localPath,
                                            checkLIGFile=check_localPath, missingFile=missingparams_localPath)
 
-        self._defineOutputs(outputSystem=amber_files)
-        self._defineSourceRelation(self.inputStructure, amber_files)
+        self._defineOutputs(outputSystem=amber_system)
+        self._defineSourceRelation(self.inputSetOfMols, amber_system)
 
     # --------------------------- INFO functions -----------------------------------
 
     def convertPDB(self, proteinFile):
         inName, inExt = os.path.splitext(os.path.basename(proteinFile))
-        oFile = os.path.abspath(os.path.join(self._getTmpPath(inName + '.pdb')))
+        oFile = self.getConvFile(inName)
 
         args = ' -i{} {} -opdb -O {}'.format(inExt[1:], os.path.abspath(proteinFile), oFile)
         runOpenBabel(protocol=self, args=args, cwd=self._getTmpPath())
@@ -240,9 +241,31 @@ using the pdb4amber and Antechamber programs from AMEBERTOOLS
                            'preparation programs in AmberTools21: pdb4amber and LEaP. \n'
                            'Finally, the program LEap returns two files which will be necessary for the MD simulation'
                            '(.crd and .prmtop files) and a .pdb file to visualize the structure')
-
         return methods
 
+    def _validate(self):
+        vals = []
+        if not self.inputLigand.get():
+            vals.append('You must specify the ligand to prepare.')
+
+    def getInputMolecule(self):
+        molName = self.inputLigand.get()
+        for mol in self.inputSetOfMols.get():
+            if mol.__str__() == molName:
+                return mol
+
+    def getInputFile(self):
+        inputLigand = self.getInputMolecule()
+        ligandFile = inputLigand.getPoseFile()
+        if not ligandFile:
+            ligandFile = inputLigand.getFileName()
+        return ligandFile
+
+    def getConvFile(self, inName):
+        return os.path.abspath(os.path.join(self._getExtraPath(inName + '.pdb')))
+
+    def getInputBaseName(self):
+        return getBaseFileName(self.getInputFile())
 
 
 
