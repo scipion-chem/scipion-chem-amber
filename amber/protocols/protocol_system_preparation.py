@@ -27,23 +27,26 @@
 """
 This module will prepare the system for the simulation
 """
-from os.path import relpath, abspath
+from os.path import abspath
 
-import os
-
-import numpy as np
 
 from pwem.protocols import EMProtocol, ProtImportFiles
 from pyworkflow.protocol import params
 from pyworkflow.utils import Message
 
 import amber
-from amber import Plugin as amberPlugin
-from pwchem.utils import runOpenBabel
+from pwchem.utils import *
 
 import amber.objects as amberobj
 from amber.objects import *
 
+waterFFDic = {'tip3p': 'TIP3PBOX', 'tip4pew': 'TIP4PEWBOX', 'spce': 'SPCEBOX', 'opc': 'OPCBOX',
+              'opc3': 'OPCBOX'}
+chargeDic = {'RESP': 'resp', 'AM1-BCC': 'bcc', 'CM1': 'cm1', 'CM2': 'cm2', 'ESP': 'esp',
+             'Mulliken': 'mul', 'Gasteiger': 'gas'}
+statusDic = {'brief': 0, 'deafult': 1, 'verbose': 2}
+
+ATOMSTRUCT, LIGAND = 0, 1
 
 class AmberSystemPrep(EMProtocol):
     """
@@ -71,20 +74,20 @@ class AmberSystemPrep(EMProtocol):
         Define the input parameters that will be used.
         """
         form.addSection(label=Message.LABEL_INPUT)
+        form.addParam('fromInput', params.EnumParam, choices=['AtomStructure', 'Ligand'], 
+                      label='Input from: ', default=0,
+                      help='Whether to use a simple atomic structure or a docked ligand together with the atom '
+                           'structure it is docked to')
 
         form.addParam('inputStructure', params.PointerParam,
-                      label="Input structure:", allowsNull=False,
-                      important=True, pointerClass='AtomStruct',
+                      label="Input structure:", allowsNull=True,
+                      important=True, pointerClass='AtomStruct', condition='fromInput==0',
                       help='Atom structure to convert to Amber system')
-        form.addParam('ligand', params.BooleanParam,
-                      label="Do you want to use a ligand?:", allowsNull=True,
-                      help='Ligand structure to convert to Amber system, you can extract this structure by using'
-                           ' the protocol "amber-Extract_ligand" or input a structure file')
         form.addParam('inputLigands', params.PointerParam,
-                      label="Import extracted ligands:", allowsNull=True, condition='ligand == True',
+                      label="Import docked small molecules:", allowsNull=True, condition='fromInput==1',
                       important=True, pointerClass='SetOfSmallMolecules')
         form.addParam('inputLigandSelect', params.StringParam,
-                      label="Select ligand structure:", allowsNull=True, condition='ligand == True',
+                      label="Select ligand structure:", condition='fromInput==1',
                       important=True, pointerClass='SetOfSmallMolecules')
 
         group = form.addGroup('target modification options')
@@ -99,7 +102,7 @@ class AmberSystemPrep(EMProtocol):
         group.addParam('tleap', params.BooleanParam, default=False,
                        label='Use tleap to add missing atoms (EXPERIMENTAL): ')
 
-        group = form.addGroup('ligand modifications options', condition='ligand == True')
+        group = form.addGroup('ligand modifications options', condition='fromInput==1')
         group.addParam('proteinResidues', params.BooleanParam, default=False,
                        label='Keep only protein residues: ')
         group.addParam('AmberCompatibleResidues', params.BooleanParam, default=False,
@@ -114,11 +117,11 @@ class AmberSystemPrep(EMProtocol):
         group.addParam('tleap', params.BooleanParam, default=False,
                        label='Use tleap to add missing atoms (EXPERIMENTAL): ')
 
-        group = form.addGroup('Ligand parametrization', condition='ligand == True')
+        group = form.addGroup('Ligand parametrization', condition='fromInput==1')
         group.addParam('ChargeModel', params.EnumParam,
-                       choices=self._ChargeModel, allowsNull=True,
+                       choices=self._ChargeModel,
                        label='Choose the charge model in order to calculate the atomic point charges: ')
-        group.addParam('Status', params.EnumParam, allowsNull=True,
+        group.addParam('Status', params.EnumParam,
                        choices=self._Status,
                        label='Choose status information: ')
 
@@ -129,27 +132,26 @@ class AmberSystemPrep(EMProtocol):
                                                   'systems. You should select as '
                                                   'many force fields as molecules in your system (i.e protein + ligand')
 
-        group.addParam('ProteinForceField', params.BooleanParam, allowsNull=True,
+        group.addParam('ProteinForceField', params.BooleanParam,
                        label='Protein Force Field')
         group.addParam('ProteinForceFieldType', params.EnumParam,
                        label='Type',
                        choices=['ff14SB', 'ff19SB', 'ff14SBonlysc', 'ff15ipq', 'fb15', 'ff03.r1', 'ff03ua'],
                        condition='ProteinForceField')
-        group.addParam('LigandForceField', params.BooleanParam, allowsNull=True, default= False, condition='ligand == True',
-                       label='Ligand Force Field', help= 'if you have chosen to introduce a ligand, this force field is mandatory')
-        group.addParam('DNAForceField', params.BooleanParam, allowsNull=True,
+        group.addParam('LigandForceField', params.BooleanParam, default= False, 
+                       condition='fromInput==1', label='Ligand Force Field', 
+                       help= 'if you have chosen to introduce a ligand, this force field is mandatory')
+        group.addParam('DNAForceField', params.BooleanParam,
                        label='DNA Force Field')
-        group.addParam('RNAForceField', params.BooleanParam, allowsNull=True,
+        group.addParam('RNAForceField', params.BooleanParam,
                        label='RNA Force Field')
         group.addParam('RNAForceFieldType', params.EnumParam, condition='RNAForceField',
                        label='Type', choices=['OL3', 'LJbb', 'YIL', 'ROC', 'Shaw'])
-        group.addParam('LipidForceField', params.BooleanParam, allowsNull=True,
+        group.addParam('LipidForceField', params.BooleanParam,
                        label='Lipid Force Field')
         group.addParam('WaterForceField', params.EnumParam,
-                       choices=['tip4pew', 'spce', 'spceb', 'opc', 'opc3', 'tip3p'],
-                       allowsNull=True,
-                       label='Water Force Field: ',
-                       help='Force field applied to the water')
+                       choices=['tip4pew', 'spce', 'spceb', 'opc', 'opc3', 'tip3p'],      
+                       label='Water Force Field: ', help='Force field applied to the water')
 
         group = form.addGroup('Disulfide bridges')
         group.addParam('DisulfideBridges', params.BooleanParam,
@@ -173,24 +175,21 @@ class AmberSystemPrep(EMProtocol):
 
     def _insertAllSteps(self):
         # Insert processing steps
-        if self.ligand == True:
-            self._insertFunctionStep('PrepStep')
-            self._insertFunctionStep('AntechamberStep')
-            self._insertFunctionStep('ParmStep')
-            self._insertFunctionStep('LeapStep')
-        self._insertFunctionStep('PDBAmberStep')
-        self._insertFunctionStep('ForceFieldStep')
+        if self.fromInput == LIGAND:
+            #self._insertFunctionStep('prepStep')
+            self._insertFunctionStep('antechamberStep')
+            self._insertFunctionStep('parmStep')
+            self._insertFunctionStep('leapStep')
+        self._insertFunctionStep('pdb4AmberStep')
+        self._insertFunctionStep('forceFieldStep')
         self._insertFunctionStep('createOutputStep')
 
-    def PrepStep(self):
-        for mol in self.inputLigands.get():
-            if mol.getUniqueName() == self.inputLigandSelect:
-                myMol = mol
-                break
-        myMolFile = os.path.abspath(myMol.getFileName())
+    def prepStep(self):
+        myMolFile = self.getLigandFile()
+        if not myMolFile.endswith('.pdb'):
+            myMolFile = self.convertPDB(myMolFile)
 
-        inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
-        systemBasename = os.path.basename(inputStructure.split(".")[0])
+        systemBasename = self.getSystemName()
 
         params = '{} > {}.LIG.pdb '.format(myMolFile, systemBasename)
 
@@ -207,47 +206,28 @@ class AmberSystemPrep(EMProtocol):
 
         amber.Plugin.runAmbertools(self, 'pdb4amber', params, cwd=self._getPath())
 
-    def AntechamberStep(self):
-        inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
-        systemBasename = os.path.basename(inputStructure.split(".")[0])
+    def antechamberStep(self):
+        myMolFile = self.getLigandFile()
+        if not myMolFile.endswith('.pdb'):
+            myMolFile = self.convertPDB(myMolFile)
+        systemBasename = self.getSystemName()
 
-        params = ' -i {}.LIG.pdb -fi pdb -o {}.LIG.mol2 -fo mol2 '.format(*[systemBasename]*2)
-
-        if self.getEnumText('ChargeModel') == 'RESP':
-            params += '-c resp '
-        if self.getEnumText('ChargeModel') == 'AM1-BCC':
-            params += '-c bcc '
-        if self.getEnumText('ChargeModel') == 'CM1':
-            params += '-c cm1 '
-        if self.getEnumText('ChargeModel') == 'CM2':
-            params += '-c cm2 '
-        if self.getEnumText('ChargeModel') == 'ESP':
-            params += '-c esp '
-        if self.getEnumText('ChargeModel') == 'Mulliken':
-            params += '-c mul '
-        if self.getEnumText('ChargeModel') == 'Gasteiger':
-            params += '-c gas '
-
-        if self.getEnumText('Status') == 'brief':
-            params += '-s 0'
-        if self.getEnumText('Status') == 'default':
-            params += '-s 1'
-        if self.getEnumText('Status') == 'verbose':
-            params += '-s 2'
+        params = ' -i {} -fi pdb -o {}.LIG.mol2 -fo mol2 '.format(myMolFile, systemBasename)
+        
+        params += f"-c {chargeDic[self.getEnumText('ChargeModel')]} "
+        params += f"-s {statusDic[self.getEnumText('Status')]} "
 
         amber.Plugin.runAmbertools(self, 'antechamber', params, cwd=self._getPath())
 
-    def ParmStep(self):
-        inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
-        systemBasename = os.path.basename(inputStructure.split(".")[0])
+    def parmStep(self):
+        systemBasename = self.getSystemName()
 
         params = '-i {}.LIG.mol2 -o {}.LIG.frcmod -f mol2 '.format(*[systemBasename]*2)
 
         amber.Plugin.runAmbertools(self, 'parmchk2', params, cwd=self._getPath())
 
-    def LeapStep(self):
-        inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
-        systemBasename = os.path.basename(inputStructure.split(".")[0])
+    def leapStep(self):
+        systemBasename = self.getSystemName()
 
         params = 'source leaprc.gaff \n' \
                  'loadamberparams {}.LIG.frcmod \n' \
@@ -257,18 +237,18 @@ class AmberSystemPrep(EMProtocol):
                  'savepdb LIG {}.checkLIG.pdb \n' \
                  'quit'.format(*[systemBasename]*6)
 
-        file = open(self._getExtraPath("leap_commands.txt"), "w")
+        file = open(self._getExtraPath("leap_commandsLIG.txt"), "w")
         file.write(params)
         file.close()
 
-        amber.Plugin.runAmbertools(self, 'tleap ', "-f extra/leap_commands.txt", cwd=self._getPath())
+        amber.Plugin.runAmbertools(self, 'tleap ', "-f extra/leap_commandsLIG.txt", cwd=self._getPath())
+        os.rename(self._getPath('leap.log'), self._getPath('leapLIG.log'))
 
-
-    def PDBAmberStep(self):
-        inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
+    def pdb4AmberStep(self):
+        inputStructure = self.getProteinFile()
         if not inputStructure.endswith('.pdb'):
             inputStructure = self.convertPDB(inputStructure)
-        systemBasename = os.path.basename(inputStructure.split(".")[0])
+        systemBasename = getBaseFileName(inputStructure)
 
         params = '{} > {}.amber.pdb -y '.format(inputStructure, systemBasename)
 
@@ -285,9 +265,8 @@ class AmberSystemPrep(EMProtocol):
 
         amber.Plugin.runAmbertools(self, 'pdb4amber', params, cwd=self._getPath())
 
-    def ForceFieldStep(self):
-        inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
-        systemBasename = os.path.basename(inputStructure.split(".")[0])
+    def forceFieldStep(self):
+        systemBasename = self.getSystemName()
 
         params = '\n'
 
@@ -306,9 +285,10 @@ class AmberSystemPrep(EMProtocol):
 
         params += 'APO = loadPdb {}.amber.pdb \n'.format(systemBasename)
 
-        if self.ligand == True:
+        if self.fromInput == LIGAND:
 
-            params += 'loadamberparams {}.LIG.frcmod \n' \
+            params += 'source leaprc.gaff \n' \
+                      'loadamberparams {}.LIG.frcmod \n' \
                       'loadOff {}.LIG.lib \n' \
                       'LIG = loadmol2 {}.LIG.mol2 \n'.format(*[systemBasename]*3)
 
@@ -319,63 +299,32 @@ class AmberSystemPrep(EMProtocol):
                 second = pair.split('-')[1]
                 params += 'bond APO.{}.SG APO.{}.SG \n'.format(first, second)
 
-        if self.ligand == True:
-            params += 'COMPL = combine { APO LIG } \n'
-
-            if self.getEnumText('SolvateStep') == 'Cubic':
-                Boxtype = 'SolvateBox'
-            else:
-                Boxtype = 'SolvateOct'
-
-            if self.getEnumText('WaterForceField') == 'tip3p':
-                params += 'charge COMPL \n {} COMPL TIP3PBOX {} iso \n'.format(Boxtype, self.Distance.get())
-            elif self.getEnumText('WaterForceField') == 'tip4pew':
-                params += 'charge COMPL \n {} COMPL TIP4PEWBOX {} iso \n'.format(Boxtype, self.Distance.get())
-            elif self.getEnumText('WaterForceField') == 'spece':
-                params += 'charge COMPL \n {} COMPL SPCEBOX {} iso \n'.format(Boxtype, self.Distance.get())
-            elif self.getEnumText('WaterForceField') == 'opc':
-                params += 'charge COMPL \n {} COMPL OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
-            elif self.getEnumText('WaterForceField') == 'opc3':
-                params += 'charge COMPL \n {} COMPL OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
-
-            params += 'addIons COMPL Cl- 0 \n addIons COMPL Na+ 0 \n'
-            params += 'saveAmberParm COMPL {}.top {}.crd \n savepdb COMPL {}_check.pdb \n' \
-                      'quit'.format(systemBasename, systemBasename, systemBasename)
-
-            file = open(self._getExtraPath("leap_commands.txt"), "w")
-            file.write(params)
-            file.close()
-
+        if self.getEnumText('SolvateStep') == 'Cubic':
+          Boxtype = 'SolvateBox'
         else:
-            if self.getEnumText('SolvateStep') == 'Cubic':
-                Boxtype = 'SolvateBox'
-            else:
-                Boxtype = 'SolvateOct'
+          Boxtype = 'SolvateOct'
 
-            if self.getEnumText('WaterForceField') == 'tip3p':
-                params += 'charge APO \n {} APO TIP3PBOX {} iso \n'.format(Boxtype, self.Distance.get())
-            elif self.getEnumText('WaterForceField') == 'tip4pew':
-                params += 'charge APO \n {} APO TIP4PEWBOX {} iso \n'.format(Boxtype, self.Distance.get())
-            elif self.getEnumText('WaterForceField') == 'spece':
-                params += 'charge APO \n {} APO SPCEBOX {} iso \n'.format(Boxtype, self.Distance.get())
-            elif self.getEnumText('WaterForceField') == 'opc':
-                params += 'charge APO \n {} APO OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
-            elif self.getEnumText('WaterForceField') == 'opc3':
-                params += 'charge APO \n {} APO OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
+        if self.fromInput == LIGAND:
+            complexName = 'COMPL'
+            params += 'COMPL = combine { APO LIG } \n'
+        else:
+            complexName = 'APO'
 
-            params += 'addIons APO Cl- 0 \n addIons APO Na+ 0 \n'
-            params += 'saveAmberParm APO {}.top {}.crd \n savepdb APO {}_check.pdb \n' \
-                      'quit'.format(systemBasename, systemBasename, systemBasename)
+        params += f"charge {complexName} \n {Boxtype} {complexName} " \
+                  f"{waterFFDic[self.getEnumText('WaterForceField')]} {self.Distance.get()} iso \n"
 
-            file = open(self._getExtraPath("leap_commands.txt"), "w")
-            file.write(params)
-            file.close()
+        params += f'addIons {complexName} Cl- 0 \n addIons {complexName} Na+ 0 \n'
+        params += f'saveAmberParm {complexName} {systemBasename}.top {systemBasename}.crd \n savepdb ' \
+                  f'{complexName} {systemBasename}_check.pdb \nquit'
+
+        file = open(self._getExtraPath("leap_commands.txt"), "w")
+        file.write(params)
+        file.close()
 
         amber.Plugin.runAmbertools(self, 'tleap ', "-f extra/leap_commands.txt", cwd=self._getPath())
 
     def createOutputStep(self):
-        inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
-        systemBasename = os.path.basename(inputStructure.split(".")[0])
+        systemBasename = self.getSystemName()
 
         topol_baseName = '{}.top'.format(systemBasename)
         crd_baseName = '{}.crd'.format(systemBasename)
@@ -387,12 +336,15 @@ class AmberSystemPrep(EMProtocol):
         check_localPath = abspath(self._getPath(check_baseName))
 
 
-        amber_files = amberobj.AmberSystem(filename=crd_localPath, topoFile=topol_localPath,
+        amber_system = amberobj.AmberSystem(filename=crd_localPath, topoFile=topol_localPath,
                                            checkFile=check_localPath, ff=self.getEnumText('ProteinForceFieldType'),
                                            wff=self.getEnumText('WaterForceField'))
 
-        self._defineOutputs(outputSystem=amber_files)
-        self._defineSourceRelation(self.inputStructure, amber_files)
+        self._defineOutputs(outputSystem=amber_system)
+        if self.fromInput.get() == LIGAND:
+            self._defineSourceRelation(self.inputLigands, amber_system)
+        else:
+            self._defineSourceRelation(self.inputStructure, amber_system)
 
     # --------------------------- INFO functions -----------------------------------
 
@@ -430,3 +382,25 @@ class AmberSystemPrep(EMProtocol):
                            '(.crd and .prmtop files) and a .pdb file to visualize the structure')
 
         return methods
+
+    def getProteinFile(self):
+        if self.fromInput == LIGAND:
+            return abspath(self.inputLigands.get().getProteinFile())
+        else:
+            return abspath(self.inputStructure.get().getFileName())
+        
+    def getLigandFile(self):
+      if self.fromInput == LIGAND:
+          for mol in self.inputLigands.get():
+            if mol.__str__() == self.inputLigandSelect.get():
+              myMol = mol
+              break
+          
+          molFile = mol.getPoseFile()
+          if not molFile:
+              molFile = mol.getFileName()
+              print(f'Careful, using file {molFile} from input ligand, which might not be docked')
+          return abspath(molFile)
+
+    def getSystemName(self):
+        return getBaseFileName(self.getProteinFile())

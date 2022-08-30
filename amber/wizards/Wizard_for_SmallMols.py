@@ -29,6 +29,11 @@
 from pwchem.wizards import *
 from amber.protocols import *
 
+GetRadiusProtein().addTarget(protocol=AmberSystemPrep,
+                             targets=['Distance'],
+                             inputs=[{'fromInput': ['inputStructure', 'inputLigands']}],
+                             outputs=['Distance'])
+
 SelectElementWizard().addTarget(protocol=AmberSystemPrep,
                                 targets=['inputLigandSelect'],
                                 inputs=['inputLigands'],
