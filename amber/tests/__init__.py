@@ -24,5 +24,5 @@
 # *
 # **************************************************************************
 
-from amber.tests.tests import *
+from amber.tests.tests import TestAmberPrepareSystem, TestAmberPrepareSystemLigand
 

@@ -191,31 +191,33 @@ class AmberSystemPrep(EMProtocol):
         if myMolFile.endswith('.pdbqt'):
           myMolFile = self.convertPDB(myMolFile)
 
+        #  todo: pdb4amber???
+
         if self.addHydrogens.get() == 0:
             outFile = myMolFile
         elif self.addHydrogens.get() == 1:
             args = '{} > {}'.format(myMolFile, outFile)
-            amber.Plugin.runAmbertools(self, 'reduce', args, cwd=self._getPath())
+            amber.Plugin.runAmbertools(self, 'reduce', args, cwd=self._getExtraPath())
         elif self.addHydrogens.get() == 2:
             outFile = self.rdkitAddHydrogens(myMolFile)
         else:
             args = ' -i{} {} -h -opdb -O {}'.format(os.path.splitext(myMolFile)[1][1:],
                                                      os.path.abspath(myMolFile), outFile)
-            pwchemPlugin.runOPENBABEL(protocol=self, args=args, cwd=self._getPath(), popen=False)
+            pwchemPlugin.runOPENBABEL(protocol=self, args=args, cwd=self._getExtraPath(), popen=False)
 
         # Antechamber
-        molFile = os.path.abspath(self._getPath('{}.LIG.mol2'.format(systemBasename)))
+        molFile = os.path.abspath(self._getExtraPath('{}.LIG.mol2'.format(systemBasename)))
         params = ' -i {} -fi {} -o {} -fo mol2'.format(outFile, os.path.splitext(outFile)[1][1:], molFile)
         params += f" -c {chargeDic[self.getEnumText('ChargeModel')]} "
-        amber.Plugin.runAmbertools(self, 'antechamber', params, cwd=self._getPath())
+        amber.Plugin.runAmbertools(self, 'antechamber', params, cwd=self._getExtraPath())
         molFile = self.removeDuplicatedBondsMol2(molFile)
 
         # parmchk2: check if all parameters needed are available
         paramFile = '{}.LIG.frcmod'.format(systemBasename)
         params = '-i {} -o {} -f mol2 '.format(molFile, paramFile)
-        amber.Plugin.runAmbertools(self, 'parmchk2', params, cwd=self._getPath())
+        amber.Plugin.runAmbertools(self, 'parmchk2', params, cwd=self._getExtraPath())
 
-        with open(self._getPath(paramFile)) as f:
+        with open(self._getExtraPath(paramFile)) as f:
             if 'ATTN: needs revision' in f.read():
                 print('Antechamber was not able to parametrize the ligand, manual parametrization must be done')
 
@@ -235,8 +237,8 @@ class AmberSystemPrep(EMProtocol):
         file.write(params)
         file.close()
 
-        amber.Plugin.runAmbertools(self, 'tleap ', "-f extra/leap_commandsLIG.txt", cwd=self._getPath())
-        os.rename(self._getPath('leap.log'), self._getPath('leapLIG.log'))
+        amber.Plugin.runAmbertools(self, 'tleap ', "-f leap_commandsLIG.txt", cwd=self._getExtraPath())
+        os.rename(self._getExtraPath('leap.log'), self._getExtraPath('leapLIG.log'))
 
     def pdb4AmberStep(self):
         inputStructure = self.getProteinFile()
@@ -257,7 +259,7 @@ class AmberSystemPrep(EMProtocol):
         if self.tleap:
             params += '--add-missing-atoms '
 
-        amber.Plugin.runAmbertools(self, 'pdb4amber', params, cwd=self._getPath())
+        amber.Plugin.runAmbertools(self, 'pdb4amber', params, cwd=self._getExtraPath())
 
     def forceFieldStep(self):
         systemBasename = self.getSystemName()
@@ -290,10 +292,7 @@ class AmberSystemPrep(EMProtocol):
                 second = pair.split('-')[1]
                 params += 'bond APO.{}.SG APO.{}.SG \n'.format(first, second)
 
-        if self.getEnumText('SolvateStep') == 'Cubic':
-          Boxtype = 'SolvateBox'
-        else:
-          Boxtype = 'SolvateOct'
+        Boxtype = 'SolvateBox' if self.getEnumText('SolvateStep') == 'Cubic' else 'SolvateOct'
 
         if self.fromInput == LIGAND:
             complexName = 'COMPL'
@@ -321,23 +320,21 @@ class AmberSystemPrep(EMProtocol):
         file.write(params)
         file.close()
 
-        amber.Plugin.runAmbertools(self, 'tleap ', "-f extra/leap_commands.txt", cwd=self._getPath())
+        amber.Plugin.runAmbertools(self, 'tleap ', "-f leap_commands.txt", cwd=self._getExtraPath())
 
     def createOutputStep(self):
         systemBasename = self.getSystemName()
 
-        topol_baseName = '{}.prmtop'.format(systemBasename)
-        rst_baseName = '{}.rst7'.format(systemBasename)
-        check_baseName = '{}_check.pdb'.format(systemBasename)
+        topFile = abspath(self._getPath('{}.prmtop'.format(systemBasename)))
+        rstFile = abspath(self._getPath('{}.rst7'.format(systemBasename)))
+        checkFile = abspath(self._getPath('{}_check.pdb'.format(systemBasename)))
 
+        os.rename(abspath(self._getExtraPath('{}.prmtop'.format(systemBasename))), topFile)
+        os.rename(abspath(self._getExtraPath('{}.rst7'.format(systemBasename))), rstFile)
+        os.rename(abspath(self._getExtraPath('{}_check.pdb'.format(systemBasename))), checkFile)
 
-        topol_localPath = abspath(self._getPath(topol_baseName))
-        rst_localPath = abspath(self._getPath(rst_baseName))
-        check_localPath = abspath(self._getPath(check_baseName))
-
-
-        amber_system = amberobj.AmberSystem(filename=rst_localPath, topoFile=topol_localPath,
-                                           checkFile=check_localPath, ff=self.getEnumText('ProteinForceFieldType'),
+        amber_system = amberobj.AmberSystem(filename=rstFile, topoFile=topFile,
+                                           checkFile=checkFile, ff=self.getEnumText('ProteinForceFieldType'),
                                            wff=self.getEnumText('WaterForceField'))
         amber_system.setResNames(parse=True)
 
@@ -357,17 +354,6 @@ class AmberSystemPrep(EMProtocol):
         runOpenBabel(protocol=self, args=args, cwd=self._getTmpPath())
 
         return oFile
-
-    def writeParamsFile(self, paramsFile, molFile):
-        with open(paramsFile, 'w') as f:
-            f.write('ligandFiles: {}\n'.format(molFile))
-
-            f.write('outputDir: {}\n'.format(os.path.abspath(self._getExtraPath())))
-            f.write('doHydrogens: True\n')
-            f.write('doGasteiger: False\n')
-            f.write('ffMethod: MMFF94\n')
-            f.write('outFormat: pdb\n')
-        return paramsFile
 
     def _summary(self):
         """ Summarize what the protocol has done"""
@@ -454,7 +440,6 @@ class AmberSystemPrep(EMProtocol):
             f.write(outStr.replace(infoLine, newInfoLine))
 
         return outFile
-
 
     def rdkitAddHydrogens(self, inFile):
       paramsFile = os.path.abspath(self._getTmpPath('addHydrogens.txt'))

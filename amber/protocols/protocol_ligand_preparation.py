@@ -43,6 +43,10 @@ from pwchem import Plugin
 import amber.objects as amberobj
 from amber import Plugin as amberPlugin
 
+anteChDic = {'RESP': 'resp', 'AM1-BCC': 'bcc', 'CM1': 'cm1', 'CM2': 'cm2', 'ESP': 'esp',
+             'Mulliken': 'mul', 'Gasteiger': 'gas'}
+
+statusDic = {'brief': 0, 'default': 1, 'verbose': 2}
 
 class AmberLigandPrep(EMProtocol):
     """
@@ -118,7 +122,7 @@ using the pdb4amber and Antechamber programs from AMBERTOOLS
             shutil.copy(ligandFile, inputStructure)
 
         systemBasename = os.path.basename(inputStructure.split(".")[0])
-        params = '{} > {}.LIG.pdb --no-conect '.format(inputStructure, systemBasename)
+        params = '{} > {}.pdb --no-conect '.format(inputStructure, systemBasename)
 
         if self.proteinResidues:
             params += '-p '
@@ -131,81 +135,59 @@ using the pdb4amber and Antechamber programs from AMBERTOOLS
         if self.tleap:
             params += '--add-missing-atoms '
 
-        amber.Plugin.runAmbertools(self, 'pdb4amber', params, cwd=self._getPath())
+        amber.Plugin.runAmbertools(self, 'pdb4amber', params, cwd=self._getExtraPath())
 
     def antechamberStep(self):
         systemBasename = self.getInputBaseName()
 
-        params = ' -i {}.LIG.pdb -fi pdb -o {}.LIG.mol2 -fo mol2 '.format(*[systemBasename]*2)
+        params = ' -i {}.pdb -fi pdb -o {}.mol2 -fo mol2 '.format(*[systemBasename]*2)
+        params += '-c {} '.format(anteChDic[self.getEnumText('ChargeModel')])
+        params += '-s {}'.format(statusDic[self.getEnumText('Status')])
 
-        if self.getEnumText('ChargeModel') == 'RESP':
-            params += '-c resp '
-        if self.getEnumText('ChargeModel') == 'AM1-BCC':
-            params += '-c bcc '
-        if self.getEnumText('ChargeModel') == 'CM1':
-            params += '-c cm1 '
-        if self.getEnumText('ChargeModel') == 'CM2':
-            params += '-c cm2 '
-        if self.getEnumText('ChargeModel') == 'ESP':
-            params += '-c esp '
-        if self.getEnumText('ChargeModel') == 'Mulliken':
-            params += '-c mul '
-        if self.getEnumText('ChargeModel') == 'Gasteiger':
-            params += '-c gas '
-
-        if self.getEnumText('Status') == 'brief':
-            params += '-s 0'
-        if self.getEnumText('Status') == 'default':
-            params += '-s 1'
-        if self.getEnumText('Status') == 'verbose':
-            params += '-s 2'
-
-        amber.Plugin.runAmbertools(self, 'antechamber', params, cwd=self._getPath())
+        amber.Plugin.runAmbertools(self, 'antechamber', params, cwd=self._getExtraPath())
 
     def parmStep(self):
         systemBasename = self.getInputBaseName()
-        params = '-i {}.LIG.mol2 -o {}.LIG.frcmod -f mol2 '.format(*[systemBasename]*2)
+        params = '-i {}.mol2 -o {}.frcmod -f mol2 '.format(*[systemBasename]*2)
 
-        amber.Plugin.runAmbertools(self, 'parmchk2', params, cwd=self._getPath())
+        amber.Plugin.runAmbertools(self, 'parmchk2', params, cwd=self._getExtraPath())
 
     def leapStep(self):
         inputStructure = os.path.abspath(self.getConvFile(getBaseFileName(self.getInputFile())))
         systemBasename = os.path.basename(inputStructure.split(".")[0])
         params = 'source leaprc.gaff \n' \
-                 'LIG = loadmol2 {}.LIG.mol2 \n' \
-                 'loadamberparams {}.LIG.frcmod \n' \
-                 'saveoff LIG {}.lig.lib \n' \
-                 'saveamberparm LIG {}.LIG.prmtop {}.LIG.rst7 \n' \
-                 'savepdb LIG {}.check.pdb \n' \
+                 'LIG = loadmol2 {}.mol2 \n' \
+                 'loadamberparams {}.frcmod \n' \
+                 'saveoff LIG {}.lib \n' \
+                 'saveamberparm LIG {}.prmtop {}.rst7 \n' \
+                 'savepdb LIG {}_check.pdb \n' \
                  'quit'.format(*[systemBasename]*6)
 
         file = open(self._getExtraPath("leap_commands.txt"), "w")
         file.write(params)
         file.close()
 
-        amber.Plugin.runAmbertools(self, 'tleap ', "-f extra/leap_commands.txt", cwd=self._getPath())
+        amber.Plugin.runAmbertools(self, 'tleap ', "-f leap_commands.txt", cwd=self._getExtraPath())
 
 
     def createOutputStep(self):
         systemBasename = self.getInputBaseName()
 
-        topol_baseName = '{}.LIG.top'.format(systemBasename)
-        crd_baseName = '{}.LIG.crd'.format(systemBasename)
-        lib_baseName = '{}.LIG.lib'.format(systemBasename)
-        origin_baseName = '{}.LIG.pdb'.format(systemBasename)
-        check_baseName = '{}_checkLIG.pdb'.format(systemBasename)
-        missingparams_baseName = '{}.LIG.frcmod'.format(systemBasename)
+        topoFile = abspath(self._getPath('{}.prmtop'.format(systemBasename)))
+        crdFile = abspath(self._getPath('{}.rst7'.format(systemBasename)))
+        checkFile = abspath(self._getPath('{}_check.pdb'.format(systemBasename)))
+        os.rename(abspath(self._getExtraPath('{}.prmtop'.format(systemBasename))), topoFile)
+        os.rename(abspath(self._getExtraPath('{}.rst7'.format(systemBasename))), crdFile)
+        os.rename(abspath(self._getExtraPath('{}_check.pdb'.format(systemBasename))), checkFile)
 
-        topol_localPath = abspath(self._getPath(topol_baseName))
-        crd_localPath = abspath(self._getPath(crd_baseName))
-        lib_localPath = abspath(self._getPath(lib_baseName))
-        origin_localPath = abspath(self._getPath(origin_baseName))
-        check_localPath = abspath(self._getPath(check_baseName))
-        missingparams_localPath = abspath(self._getPath(missingparams_baseName))
+        libFile = abspath(self._getExtraPath('{}.lib'.format(systemBasename)))
+        originFile = abspath(self._getExtraPath('{}.pdb'.format(systemBasename)))
+        missingparamsFile = abspath(self._getExtraPath('{}.frcmod'.format(systemBasename)))
 
-        amber_system = amberobj.AmberSystem(fileLIGname=crd_localPath, topoLIGFile=topol_localPath,
-                                           libFile=lib_localPath, originLIGFile=origin_localPath,
-                                           checkLIGFile=check_localPath, missingFile=missingparams_localPath)
+        amber_system = amberobj.AmberSystem(filename=crdFile, topoFile=topoFile,
+                                            checkFile=checkFile)
+                                            # libFile=lib_localPath, originLIGFile=origin_localPath,
+                                            # missingFile=missingparams_localPath)
 
         self._defineOutputs(outputSystem=amber_system)
         self._defineSourceRelation(self.inputSetOfMols, amber_system)
@@ -265,7 +247,7 @@ using the pdb4amber and Antechamber programs from AMBERTOOLS
         return ligandFile
 
     def getConvFile(self, inName):
-        return os.path.abspath(os.path.join(self._getExtraPath(inName + '.pdb')))
+        return os.path.abspath(os.path.join(self._getTmpPath(inName + '.pdb')))
 
     def getInputBaseName(self):
         return getBaseFileName(self.getInputFile())
