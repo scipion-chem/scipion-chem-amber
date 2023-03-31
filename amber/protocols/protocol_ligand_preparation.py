@@ -37,14 +37,17 @@ from pyworkflow.utils import Message
 
 import amber
 from pwchem.utils import *
+from pwchem import Plugin
+
 
 import amber.objects as amberobj
+from amber import Plugin as amberPlugin
 
 
 class AmberLigandPrep(EMProtocol):
     """
 With this protocol you will obtain coordinate and topology files from your ligand
-using the pdb4amber and Antechamber programs from AMEBERTOOLS
+using the pdb4amber and Antechamber programs from AMBERTOOLS
     """
 
 
@@ -166,13 +169,13 @@ using the pdb4amber and Antechamber programs from AMEBERTOOLS
         amber.Plugin.runAmbertools(self, 'parmchk2', params, cwd=self._getPath())
 
     def leapStep(self):
-        inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
+        inputStructure = os.path.abspath(self.getConvFile(getBaseFileName(self.getInputFile())))
         systemBasename = os.path.basename(inputStructure.split(".")[0])
         params = 'source leaprc.gaff \n' \
                  'LIG = loadmol2 {}.LIG.mol2 \n' \
                  'loadamberparams {}.LIG.frcmod \n' \
                  'saveoff LIG {}.lig.lib \n' \
-                 'saveamberparm LIG {}.LIG.top {}.LIG.crd \n' \
+                 'saveamberparm LIG {}.LIG.prmtop {}.LIG.rst7 \n' \
                  'savepdb LIG {}.check.pdb \n' \
                  'quit'.format(*[systemBasename]*6)
 

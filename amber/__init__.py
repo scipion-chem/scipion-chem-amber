@@ -24,12 +24,13 @@
 # *
 # **************************************************************************
 
+import os, subprocess
+
 import pwem
 
 from pyworkflow import join
 
 from amber.constants import AMBER_HOME, V2020, AMBER, AMBER_DEFAULT_VERSION
-from pwem.convert.atom_struct import getEnviron
 
 _logo = "icon.png"
 _references = ['Salomon-Ferrer2013']
@@ -71,11 +72,45 @@ class Plugin(pwem.Plugin):
                        default=True)
 
     @classmethod
+    def getPluginHome(cls, path=""):
+        import amber
+        fnDir = os.path.split(amber.__file__)[0]
+        return os.path.join(fnDir, path)
+
+    @classmethod
+    def getScriptsDir(cls, scriptName=''):
+        return cls.getPluginHome('scripts/%s' % scriptName)
+
+    @classmethod
+    def getEnvActivation(cls, env):
+        activation = cls.getVar("{}_ENV_ACTIVATION".format(env.upper()))
+        return activation
+
+    @classmethod
+    def runScript(cls, protocol, scriptName, args, env, cwd=None, popen=False):
+        """ Run modeller command from a given protocol. """
+        scriptName = cls.getScriptsDir(scriptName)
+        fullProgram = '%s %s && %s %s' % (cls.getCondaActivationCmd(), cls.getEnvActivation(env), 'python', scriptName)
+        if not popen:
+            protocol.runJob(fullProgram, args, env=cls.getEnviron(), cwd=cwd)
+        else:
+            subprocess.check_call(fullProgram + args, cwd=cwd, shell=True)
+
+    @classmethod
     def runAmbertools(cls, protocol, program, args, cwd=None):
         """ Run Ambertools command from a given protocol. """
         fullProgram = '%s %s && %s' % (cls.getCondaActivationCmd(), cls.getAmbertoolsEnvActivation(), program)
         protocol.runJob(fullProgram, args, env=cls.getEnviron_amber(), cwd=cwd)
 
+    @classmethod
+    def runCPPTRAJ(cls, protocol, cppTrajFile, cppTrajStr='', cwd=None):
+        """ Run Ambertools command from a given protocol. """
+        if cppTrajStr:
+            with open(os.path.abspath(cppTrajFile), 'w') as f:
+                f.write(cppTrajStr)
+
+        args = '-i {}'.format(os.path.abspath(cppTrajFile))
+        cls.runAmbertools(protocol, 'cpptraj', args, cwd)
 
     @classmethod
     def runAmberPrintf(cls, protocol, program, printfValues, args, cwd=None):

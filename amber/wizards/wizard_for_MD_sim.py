@@ -74,7 +74,7 @@ class AmberWatchRelaxStepWizard(pwizard.Wizard):
                         idx = protocol._shakeAlgorithm.index(msjDic[pName])
                     elif pName == 'coupleStyle':
                         idx = protocol._coupleStyle.index(msjDic[pName])
-                    elif pName == 'restrains':
-                        idx = protocol._restrainTypes.index(msjDic[pName])
+                    elif pName == 'restraints':
+                        idx = protocol._restraintTypes.index(msjDic[pName])
                     form.setVar(pName, idx)
 

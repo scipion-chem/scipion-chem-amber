@@ -25,11 +25,12 @@
 # *  e-mail address 'scipion@cnb.csic.es'
 # *
 # **************************************************************************
-import os, shutil
+import os
 from subprocess import check_call
-import pwem.objects.data as data
 import pyworkflow.object as pwobj
 from pwchem.objects import MDSystem
+
+from amber.constants import _cations, _anions, PROT_RESNAMES
 
 class AmberSystem(MDSystem):
     """A system atom structure (prepared for MD) in the file format of AMBER
@@ -44,9 +45,17 @@ class AmberSystem(MDSystem):
         self._libFile = pwobj.String(kwargs.get('libFile', None))
         self._originFile = pwobj.String(kwargs.get('originFile', None))
         self._missingFile = pwobj.String(kwargs.get('missingFile', None))
+        self._resNames = pwobj.String(kwargs.get('resNames', None))
 
     def __str__(self):
-        return '{} ({}, hasTrj={})'.format(self.getClassName(), os.path.basename(self.getSystemFile()),
+        cn = self.getClassName()
+        try:
+            sf = os.path.basename(self.getSystemFile())
+        except:
+            sf = self.getSystemFile()
+
+        ht = self.hasTrajectory()
+        return '{} ({}, hasTrj={})'.format(self.getClassName(), sf,
                                            self.hasTrajectory())
 
     def getCheckFile(self):
@@ -72,3 +81,47 @@ class AmberSystem(MDSystem):
 
     def setMissingFile(self, value):
         self._missingFile.set(value)
+
+    def getResNames(self):
+        if self._resNames.get():
+            return self._resNames.get().split(',')
+
+    def setResNames(self, resNames=[], parse=False):
+        if parse:
+            resNames = self.parseResidueNames()
+        self._resNames.set(','.join(resNames))
+
+    def parseResidueNames(self):
+        if self.getTopologyFile():
+            com = 'cat {} | grep -zoP "%FLAG RESIDUE_LABEL.*\\n%[^%]*" > residueStr.txt'.\
+                format(os.path.abspath(self.getTopologyFile()))
+            check_call(com, cwd='/tmp', shell=True)
+
+            resNames = set()
+            with open('/tmp/residueStr.txt') as fIn:
+                for line in fIn:
+                    if not '%' in line:
+                        for ele in line.split():
+                            resNames.add(ele)
+            if '\x00' in resNames:
+                resNames.remove('\x00')
+            return resNames
+        else:
+            return []
+
+    def getIonResNames(self):
+        ionResNames = []
+        _ions = list(_cations.values()) + list(_anions.values())
+        for rn in self.getResNames():
+            if rn in _ions:
+                ionResNames.append(rn)
+        return ionResNames
+
+    def getLigResNames(self):
+        ligResNames = []
+        nonLig = list(_cations.values()) + list(_anions.values()) + PROT_RESNAMES + ['WAT']
+        for rn in self.getResNames():
+            if rn not in nonLig:
+                ligResNames.append(rn)
+        return ligResNames
+
