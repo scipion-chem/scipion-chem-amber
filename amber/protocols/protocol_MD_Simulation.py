@@ -57,14 +57,8 @@ class AmberMDSimulation(EMProtocol):
 
     _shakeAlgorithm = ['Shake not performed', 'Bonds involving hydrogens are constrains', 'all bonds are constrained']
 
-    _paramNames = ['simTime', 'timeStep', 'timeNeigh', 'saveTrj', 'trajInterval', 'temperature', 'tempRelaxCons',
-                   'tempCouple', 'pressure', 'presRelaxCons', 'presCouple', 'EnergyMin']
-    _enumParamNames = ['integrator', 'ensemType', 'thermostat', 'barostat', 'pressureDynamics', 'Shake']
-    _defParams = {'simTime': 100, 'timeStep': 0.002, 'timeNeigh': 10, 'saveTrj': False, 'trajInterval': 1.0,
-                  'temperature': 300.0, 'tempRelaxCons': 0.1, 'tempCouple': -1, 'integrator': 'md',
-                  'pressure': 1.0, 'presRelaxCons': 2.0, 'presCouple': -1, 'restrainForce': 50.0,
-                  'ensemType': 'NVT', 'thermostat': 'V-rescale', 'barostat': 'Parrinello-Rahman',
-                  'restrains': 'None', 'pressureDynamics': 'anisotropic', 'Shake': 'Shake not performed'}
+    _omitParamNames = ['runName', 'runMode', 'insertStep', 'summarySteps', 'deleteStep', 'watchStep',
+                       'workFlowSteps', 'hostName', 'numberOfThreads', 'numberOfMpi']
 
     # -------------------------- DEFINE constants ----------------------------
     def __init__(self, **kwargs):
@@ -80,12 +74,12 @@ class AmberMDSimulation(EMProtocol):
                       allowsNull=True,
                       help='Amber solvated system to be simulated')
         group = form.addGroup('Trajectory')
-        group.addParam('saveTrj', params.BooleanParam, default=self._defParams['saveTrj'],
+        group.addParam('saveTrj', params.BooleanParam, default=False,
                        label="Save trajectory: ",
                        help='Save trajectory of the atoms during stage simulation.'
                             'The output will concatenate those trajectories which appear after the last stage '
                             'where the trajectory was not saved.')
-        group.addParam('trajInterval', params.FloatParam, default=self._defParams['trajInterval'],
+        group.addParam('trajInterval', params.FloatParam, default=1.0,
                        label='Interval time (ps):', condition='saveTrj',
                        help='Time between each frame recorded in the simulation (ps)')
 
@@ -243,15 +237,29 @@ class AmberMDSimulation(EMProtocol):
         steps = stepsStr.split('\n')
         return len(steps) - 1
 
+    def getStageParamsDic(self, type='All'):
+      '''Return a dictionary as {paramName: param} of the stage parameters of the formulary.
+      Type'''
+      paramsDic = {}
+      for paramName, param in self._definition.iterAllParams():
+        if not paramName in self._omitParamNames and not isinstance(param, params.Group) and not isinstance(param, params.Line):
+          if type == 'All':
+            paramsDic[paramName] = param
+          elif type == 'Enum' and isinstance(param, params.EnumParam):
+            paramsDic[paramName] = param
+          elif type == 'Normal' and not isinstance(param, params.EnumParam):
+            paramsDic[paramName] = param
+      return paramsDic
+
     def createMSJDic(self):
         msjDic = {}
-        for pName in self._paramNames:
+        for pName in self.getStageParamsDic(type='Normal').keys():
             if hasattr(self, pName):
                 msjDic[pName] = getattr(self, pName).get()
             else:
                 print('Something is wrong with parameter ', pName)
 
-        for pName in self._enumParamNames:
+        for pName in self.getStageParamsDic(type='Enum').keys():
             if hasattr(self, pName):
                 msjDic[pName] = self.getEnumText(pName)
             else:
@@ -260,9 +268,10 @@ class AmberMDSimulation(EMProtocol):
 
     def addDefaultForMissing(self, msjDic):
         '''Add default values for missing parameters in the msjDic'''
-        for pName in [*self._paramNames, *self._enumParamNames]:
+        paramDic = self.getStageParamsDic()
+        for pName in paramDic.keys():
             if not pName in msjDic:
-                msjDic[pName] = self._defParams[pName]
+                msjDic[pName] = paramDic[pName].default
         return msjDic
 
     def generateMDPFile(self, msjDic, mdpStage):

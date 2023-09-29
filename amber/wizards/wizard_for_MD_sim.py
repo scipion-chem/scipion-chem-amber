@@ -33,10 +33,9 @@ information such as name and number of residues.
 """
 
 # Imports
+from pwchem.wizards import AddElementSummaryWizard, DeleteElementWizard, WatchElementWizard
+
 from ..protocols import AmberMDSimulation
-from ..protocols.protocol_MD_Simulation import *
-import pyworkflow.wizard as pwizard
-from pwchem.wizards import AddElementSummaryWizard, DeleteElementWizard
 
 AddElementSummaryWizard().addTarget(protocol=AmberMDSimulation,
                              targets=['insertStep'],
@@ -48,33 +47,8 @@ DeleteElementWizard().addTarget(protocol=AmberMDSimulation,
                                 inputs=['deleteStep'],
                                 outputs=['workFlowSteps', 'summarySteps'])
 
-class AmberWatchRelaxStepWizard(pwizard.Wizard):
-    """Watch the parameters of the step of the workflow defined by the index"""
-    _targets = [(AmberMDSimulation, ['watchStep'])]
-
-    def show(self, form, *params):
-        protocol = form.protocol
-        index = int(protocol.watchStep.get().strip())
-        if protocol.countSteps() >= index > 0:
-            workSteps = protocol.workFlowSteps.get().split('\n')
-            msjDic = eval(workSteps[index - 1])
-            for pName in msjDic:
-                if pName in protocol._paramNames:
-                    form.setVar(pName, msjDic[pName])
-                elif pName in protocol._enumParamNames:
-                    if pName == 'integrator':
-                        idx = protocol._integrators.index(msjDic[pName])
-                    elif pName == 'ensemType':
-                        idx = protocol._ensemTypes.index(msjDic[pName])
-                    elif pName == 'thermostat':
-                        idx = protocol._thermostats.index(msjDic[pName])
-                    elif pName == 'barostat':
-                        idx = protocol._barostats.index(msjDic[pName])
-                    elif pName == 'Shake':
-                        idx = protocol._shakeAlgorithm.index(msjDic[pName])
-                    elif pName == 'coupleStyle':
-                        idx = protocol._coupleStyle.index(msjDic[pName])
-                    elif pName == 'restrains':
-                        idx = protocol._restrainTypes.index(msjDic[pName])
-                    form.setVar(pName, idx)
+WatchElementWizard().addTarget(protocol=AmberMDSimulation,
+                                targets=['watchStep'],
+                                inputs=['watchStep'],
+                                outputs=['workFlowSteps', 'summarySteps'])
 
