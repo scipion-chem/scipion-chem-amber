@@ -108,7 +108,7 @@ using the pdb4amber and Antechamber programs from AMEBERTOOLS
 
     def prepStep(self):
         ligandFile = self.getInputFile()
-        inputStructure = self.getConvFile(getBaseFileName(ligandFile))
+        inputStructure = self.getConvFile(getBaseName(ligandFile))
         if not ligandFile.endswith('.pdb'):
             inputStructure = self.convertPDB(ligandFile)
         else:
@@ -265,7 +265,7 @@ using the pdb4amber and Antechamber programs from AMEBERTOOLS
         return os.path.abspath(os.path.join(self._getExtraPath(inName + '.pdb')))
 
     def getInputBaseName(self):
-        return getBaseFileName(self.getInputFile())
+        return getBaseName(self.getInputFile())
 
 
 
