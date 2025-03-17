@@ -2,7 +2,11 @@
 Scipion AMBER plugin
 =======================
 
-In order to use this plug-in, you need to have Scipion3 installed (https://scipion-em.github.io/docs/docs/scipion-modes/how-to-install.html). Then you have to follow the following steps:
+In order to use this plug-in, you need to have `Scipion3 <https://scipion-em.github.io/docs/docs/scipion-modes/how-to-install.html>`_ installed.
+
+Full documentation to this plugin can be found in the `official documentation page <https://scipion-chem.github.io/docs/plugins/amber/index.html>`_.
+
+Then you have to follow the following steps:
 
 **Clone this repository:**
 
