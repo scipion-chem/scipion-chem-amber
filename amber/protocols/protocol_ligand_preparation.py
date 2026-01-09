@@ -166,8 +166,9 @@ using the pdb4amber and Antechamber programs from AMEBERTOOLS
         amber.Plugin.runAmbertools(self, 'parmchk2', params, cwd=self._getPath())
 
     def leapStep(self):
-        inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
-        systemBasename = os.path.basename(inputStructure.split(".")[0])
+        # inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
+        # systemBasename = os.path.basename(inputStructure.split(".")[0])
+        systemBasename = self.getInputBaseName()
         params = 'source leaprc.gaff \n' \
                  'LIG = loadmol2 {}.LIG.mol2 \n' \
                  'loadamberparams {}.LIG.frcmod \n' \
