@@ -25,13 +25,6 @@
 # *
 # **************************************************************************
 
-"""
-This wizard will extract the chains from a atomic structure (pdb) file in
-order to select it in the protocol.
-Then, it will load the structure and will take all chain related
-information such as name and number of residues.
-"""
-
 # Imports
 from pwchem.wizards import AddElementSummaryWizard, DeleteElementWizard, WatchElementWizard
 

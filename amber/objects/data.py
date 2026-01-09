@@ -34,7 +34,7 @@ from pwchem.objects import MDSystem
 class AmberSystem(MDSystem):
     """A system atom structure (prepared for MD) in the file format of AMBER
    crd : cordinate file .crd
-   top : topology file .prmtop
+   top : topology file .top
    check : PDB file to visualize the structure
    """
 
@@ -44,6 +44,7 @@ class AmberSystem(MDSystem):
         self._libFile = pwobj.String(kwargs.get('libFile', None))
         self._originFile = pwobj.String(kwargs.get('originFile', None))
         self._missingFile = pwobj.String(kwargs.get('missingFile', None))
+        self._topoFile = pwobj.String(kwargs.get('topoFile', None))
 
     def __str__(self):
         return '{} ({}, hasTrj={})'.format(self.getClassName(), os.path.basename(self.getSystemFile()),
