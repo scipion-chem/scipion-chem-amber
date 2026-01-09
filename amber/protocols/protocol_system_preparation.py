@@ -184,7 +184,7 @@ class AmberSystemPrep(EMProtocol):
 
     def PrepStep(self):
         for mol in self.inputLigands.get():
-            if mol.getUniqueName() == self.inputLigandSelect:
+            if mol == self.inputLigandSelect:
                 myMol = mol
                 break
         myMolFile = os.path.abspath(myMol.getFileName())
@@ -289,26 +289,26 @@ class AmberSystemPrep(EMProtocol):
         inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
         systemBasename = os.path.basename(inputStructure.split(".")[0])
 
-        params = '\n'
+        leapParams = ''
 
         if self.ProteinForceField:
-            params += 'source leaprc.protein.{} \n'.format(self.getEnumText('ProteinForceFieldType'))
+            leapParams += 'source leaprc.protein.{} \n'.format(self.getEnumText('ProteinForceFieldType'))
         if self.LigandForceField:
-            params += 'source leaprc.gaff2 \n'
+            leapParams += 'source leaprc.gaff2 \n'
         if self.DNAForceField:
-            params += 'source leaprc.DNA.OL15 \n'
+            leapParams += 'source leaprc.DNA.OL15 \n'
         if self.RNAForceField:
-            params += 'source leaprc.RNA.{} \n'.format(self.getEnumText('RNAForceFieldType'))
+            leapParams += 'source leaprc.RNA.{} \n'.format(self.getEnumText('RNAForceFieldType'))
         if self.LipidForceField:
-            params += 'source leaprc.lipid17 \n'
+            leapParams += 'source leaprc.lipid17 \n'
         if self.WaterForceField:
-            params += 'source leaprc.water.{} \n'.format(self.getEnumText('WaterForceField'))
+            leapParams += 'source leaprc.water.{} \n'.format(self.getEnumText('WaterForceField'))
 
-        params += 'APO = loadPdb {}.amber.pdb \n'.format(systemBasename)
+        leapParams += 'APO = loadPdb {}.amber.pdb \n'.format(systemBasename)
 
         if self.ligand == True:
 
-            params += 'loadamberparams {}.LIG.frcmod \n' \
+            leapParams += 'loadamberparams {}.LIG.frcmod \n' \
                       'loadOff {}.LIG.lib \n' \
                       'LIG = loadmol2 {}.LIG.mol2 \n'.format(*[systemBasename]*3)
 
@@ -317,10 +317,10 @@ class AmberSystemPrep(EMProtocol):
             for pair in self.DisulfideBridgesNumber.get().split('/'):
                 first = pair.split('-')[0]
                 second = pair.split('-')[1]
-                params += 'bond APO.{}.SG APO.{}.SG \n'.format(first, second)
+                leapParams += 'bond APO.{}.SG APO.{}.SG \n'.format(first, second)
 
         if self.ligand == True:
-            params += 'COMPL = combine { APO LIG } \n'
+            leapParams += 'COMPL = combine { APO LIG } \n'
 
             if self.getEnumText('SolvateStep') == 'Cubic':
                 Boxtype = 'SolvateBox'
@@ -328,22 +328,22 @@ class AmberSystemPrep(EMProtocol):
                 Boxtype = 'SolvateOct'
 
             if self.getEnumText('WaterForceField') == 'tip3p':
-                params += 'charge COMPL \n {} COMPL TIP3PBOX {} iso \n'.format(Boxtype, self.Distance.get())
+                leapParams += 'charge COMPL \n {} COMPL TIP3PBOX {} iso \n'.format(Boxtype, self.Distance.get())
             elif self.getEnumText('WaterForceField') == 'tip4pew':
-                params += 'charge COMPL \n {} COMPL TIP4PEWBOX {} iso \n'.format(Boxtype, self.Distance.get())
+                leapParams += 'charge COMPL \n {} COMPL TIP4PEWBOX {} iso \n'.format(Boxtype, self.Distance.get())
             elif self.getEnumText('WaterForceField') == 'spece':
-                params += 'charge COMPL \n {} COMPL SPCEBOX {} iso \n'.format(Boxtype, self.Distance.get())
+                leapParams += 'charge COMPL \n {} COMPL SPCEBOX {} iso \n'.format(Boxtype, self.Distance.get())
             elif self.getEnumText('WaterForceField') == 'opc':
-                params += 'charge COMPL \n {} COMPL OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
+                leapParams += 'charge COMPL \n {} COMPL OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
             elif self.getEnumText('WaterForceField') == 'opc3':
-                params += 'charge COMPL \n {} COMPL OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
+                leapParams += 'charge COMPL \n {} COMPL OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
 
-            params += 'addIons COMPL Cl- 0 \n addIons COMPL Na+ 0 \n'
-            params += 'saveAmberParm COMPL {}.top {}.crd \n savepdb COMPL {}_check.pdb \n' \
+            leapParams += 'addIons COMPL Cl- 0 \n addIons COMPL Na+ 0 \n'
+            leapParams += 'saveAmberParm COMPL {}.top {}.crd \n savepdb COMPL {}_check.pdb \n' \
                       'quit'.format(systemBasename, systemBasename, systemBasename)
 
             file = open(self._getExtraPath("leap_commands.txt"), "w")
-            file.write(params)
+            file.write(leapParams)
             file.close()
 
         else:
@@ -353,22 +353,22 @@ class AmberSystemPrep(EMProtocol):
                 Boxtype = 'SolvateOct'
 
             if self.getEnumText('WaterForceField') == 'tip3p':
-                params += 'charge APO \n {} APO TIP3PBOX {} iso \n'.format(Boxtype, self.Distance.get())
+                leapParams += 'charge APO \n {} APO TIP3PBOX {} iso \n'.format(Boxtype, self.Distance.get())
             elif self.getEnumText('WaterForceField') == 'tip4pew':
-                params += 'charge APO \n {} APO TIP4PEWBOX {} iso \n'.format(Boxtype, self.Distance.get())
+                leapParams += 'charge APO \n {} APO TIP4PEWBOX {} iso \n'.format(Boxtype, self.Distance.get())
             elif self.getEnumText('WaterForceField') == 'spece':
-                params += 'charge APO \n {} APO SPCEBOX {} iso \n'.format(Boxtype, self.Distance.get())
+                leapParams += 'charge APO \n {} APO SPCEBOX {} iso \n'.format(Boxtype, self.Distance.get())
             elif self.getEnumText('WaterForceField') == 'opc':
-                params += 'charge APO \n {} APO OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
+                leapParams += 'charge APO \n {} APO OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
             elif self.getEnumText('WaterForceField') == 'opc3':
-                params += 'charge APO \n {} APO OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
+                leapParams += 'charge APO \n {} APO OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
 
-            params += 'addIons APO Cl- 0 \n addIons APO Na+ 0 \n'
-            params += 'saveAmberParm APO {}.top {}.crd \n savepdb APO {}_check.pdb \n' \
+            leapParams += 'addIons APO Cl- 0 \n addIons APO Na+ 0 \n'
+            leapParams += 'saveAmberParm APO {}.top {}.crd \n savepdb APO {}_check.pdb \n' \
                       'quit'.format(systemBasename, systemBasename, systemBasename)
 
             file = open(self._getExtraPath("leap_commands.txt"), "w")
-            file.write(params)
+            file.write(leapParams)
             file.close()
 
         amber.Plugin.runAmbertools(self, 'tleap ', "-f extra/leap_commands.txt", cwd=self._getPath())
