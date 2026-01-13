@@ -29,6 +29,7 @@ This module will perform energy minimizations and equilibrium for the system bef
 """
 import os, glob, shutil
 from cProfile import label
+from email.policy import default
 
 from pyworkflow.protocol import params
 from pyworkflow.utils import Message, runJob, createLink
@@ -41,6 +42,7 @@ from pwchem.utils import natural_sort
 from amber.objects import *
 from amber.constants import *
 from amber import Plugin as amberPlugin
+
 
 class AmberMDSimulation(EMProtocol):
     """
@@ -59,6 +61,7 @@ class AmberMDSimulation(EMProtocol):
 
     _omitParamNames = ['runName', 'runMode', 'insertStep', 'summarySteps', 'deleteStep', 'watchStep',
                        'workFlowSteps', 'hostName', 'numberOfThreads', 'numberOfMpi']
+    _key_map = {'Minimization': 'min', 'Heating': 'heat', 'Simulation': 'sim'}
 
     # -------------------------- DEFINE constants ----------------------------
     def __init__(self, **kwargs):
@@ -78,18 +81,23 @@ class AmberMDSimulation(EMProtocol):
                        label='Energy Minimization: ', default=True,
                        help='Energy minimization before the simulation (recommended)')
         line = group.addLine('Minimization settings: ', condition='energyMin',
-                             help='The first 20 cycles will utilize the steepest descent' 
-                            'algorithm before shifting to the conjugate gradient '
-                            'algorithm for the remaining cycles\nThe first x cycles will utilize the steepest descent' 
-                            'algorithm before shifting to the conjugate gradient '
-                            'algorithm for the remaining cycles\n'
+                             help='The first 20 cycles will utilize the steepest descent'
+                                  'algorithm before shifting to the conjugate gradient '
+                                  'algorithm for the remaining cycles\nThe first x cycles will utilize the steepest descent'
+                                  'algorithm before shifting to the conjugate gradient '
+                                  'algorithm for the remaining cycles\n'
                                   'Sphere of influence for each atom during energy minimization')
         line.addParam('minMaxCycles', params.IntParam, default=1000,
-                       label='Maximum cycles:', condition='energyMin')
+                      label='Maximum cycles:', condition='energyMin')
         line.addParam('minSdCycles', params.IntParam, default=500,
-                       label='Steepest Descent cycles:', condition='energyMin')
+                      label='Steepest Descent cycles:', condition='energyMin')
         line.addParam('minIntCutoff', params.FloatParam, default=8.0,
-                       label='Interaction cutoff', condition='energyMin')
+                      label='Interaction cutoff', condition='energyMin')
+        group.addParam('minCustomIn', params.TextParam, width=60, readOnly=True, default=None,
+                       label='Input sander', expertLevel=params.LEVEL_ADVANCED, condition='energyMin',
+                       help='Upload a custom configuration file for the Minimization step.'
+                            'Providing a file here will override all other Minimization parameters defined in the interface. For detailed syntax and options, '
+                            'refer to the Amber Manual https://ambermd.org/doc12/Amber25.pdf.')
 
         group = form.addGroup('Heating')
         group.addParam('heatMDSteps', params.IntParam, default=5000,
@@ -102,7 +110,12 @@ class AmberMDSimulation(EMProtocol):
         group.addParam('heatFiTemp', params.FloatParam, default=300,
                        label='Final temperature (K)')
         group.addParam('heatTraj', params.IntParam, default=1000,
-                       label='Trajectory step',help='The coordinates are written to a mdcrd file x times.')
+                       label='Trajectory step', help='The coordinates are written to a mdcrd file x times.')
+        group.addParam('heatCustomIn', params.TextParam, width=60, readOnly=True, default=None,
+                       label='Input sander', expertLevel=params.LEVEL_ADVANCED,
+                       help='Upload a custom configuration file for the Heating step.'
+                            'Providing a file here will override all other Heating parameters defined in the interface. For detailed syntax and options, '
+                            'refer to the Amber Manual https://ambermd.org/doc12/Amber25.pdf.')
 
         group = form.addGroup('Simulation')
         group.addParam('simMDSteps', params.IntParam, default=10000,
@@ -111,8 +124,12 @@ class AmberMDSimulation(EMProtocol):
         group.addParam('simTimeStep', params.FloatParam, default=0.002,
                        label='Time step (ps)')
         group.addParam('simTraj', params.IntParam, default=1000,
-                       label='Trajectory step', help='The trajectory coordinates are written to a mdcrd file x times.')
-
+                       label='Trajectory step', help='The trajectory coordinates are written to a traj file x times.')
+        group.addParam('simCustomIn', params.TextParam, width=60, readOnly=True, default=None,
+                       label='Input sander', expertLevel=params.LEVEL_ADVANCED,
+                       help='Upload a custom configuration file for the MD simulation.'
+                            'Providing a file here will override all other simulation parameters defined in the interface. For detailed syntax and options, '
+                            'refer to the Amber Manual https://ambermd.org/doc12/Amber25.pdf.')
         #
         # group = form.addGroup('Ensemble')
         #
@@ -193,19 +210,30 @@ class AmberMDSimulation(EMProtocol):
 
     def minimizationStep(self):
         msjDic = self.getStageParamsDicNew('Minimization')
-        mdpFile = self.generateMDPFileNew(msjDic, 'Minimization')
-        outFile = self.callAmberNew(mdpFile,'Minimization')
+        if self.minCustomIn.get():
+            mdpFile = self.customMDPFile(msjDic, 'Minimization')
+        else:
+            mdpFile = self.generateMDPFileNew(msjDic, 'Minimization')
+
+        outFile = self.callAmberNew(mdpFile, 'Minimization')
 
     def heatingStep(self):
         msjDic = self.getStageParamsDicNew('Heating')
-        mdpFile = self.generateMDPFileNew(msjDic, 'Heating')
+        if self.heatCustomIn.get():
+            mdpFile = self.customMDPFile(msjDic, 'Heating')
+        else:
+            mdpFile = self.generateMDPFileNew(msjDic, 'Heating')
+
         outFile = self.callAmberNew(mdpFile, 'Heating')
 
     def simStep(self):
         msjDic = self.getStageParamsDicNew('Simulation')
-        mdpFile = self.generateMDPFileNew(msjDic, 'Simulation')
-        outFile = self.callAmberNew(mdpFile, 'Simulation')
+        if self.simCustomIn.get():
+            mdpFile = self.customMDPFile(msjDic, 'Simulation')
+        else:
+            mdpFile = self.generateMDPFileNew(msjDic, 'Simulation')
 
+        outFile = self.callAmberNew(mdpFile, 'Simulation')
 
     def createOutputStep(self):
         CrdAmberFile, localTopFile = self._getPath('CrdFile.crd'), self._getPath('systemTopology.parm7')
@@ -282,34 +310,36 @@ class AmberMDSimulation(EMProtocol):
         return len(steps) - 1
 
     def getStageParamsDic(self, type='All'):
-      '''Return a dictionary as {paramName: param} of the stage parameters of the formulary.
-      Type'''
-      paramsDic = {}
-      for paramName, param in self._definition.iterAllParams():
-        if not paramName in self._omitParamNames and not isinstance(param, params.Group) and not isinstance(param, params.Line):
-          if type == 'All':
-            paramsDic[paramName] = param
-          elif type == 'Enum' and isinstance(param, params.EnumParam):
-            paramsDic[paramName] = param
-          elif type == 'Normal' and not isinstance(param, params.EnumParam):
-            paramsDic[paramName] = param
-      return paramsDic
+        '''Return a dictionary as {paramName: param} of the stage parameters of the formulary.
+        Type'''
+        paramsDic = {}
+        for paramName, param in self._definition.iterAllParams():
+            if not paramName in self._omitParamNames and not isinstance(param, params.Group) and not isinstance(param,
+                                                                                                                params.Line):
+                if type == 'All':
+                    paramsDic[paramName] = param
+                elif type == 'Enum' and isinstance(param, params.EnumParam):
+                    paramsDic[paramName] = param
+                elif type == 'Normal' and not isinstance(param, params.EnumParam):
+                    paramsDic[paramName] = param
+        return paramsDic
 
     def getStageParamsDicNew(self, type):
-      '''Return a dictionary as {paramName: param} of the stage parameters of the formulary.
-      Type'''
-      paramsDic = {}
-      for paramName, param in self._definition.iterAllParams():
-        if not paramName in self._omitParamNames and not isinstance(param, params.Group) and not isinstance(param, params.Line):
-          if type == 'All':
-            paramsDic[paramName] = param
-          elif type == 'Minimization' and paramName.startswith("min"):
-            paramsDic[paramName] = getattr(self, paramName).get()
-          elif type == 'Heating' and paramName.startswith("heat"):
-            paramsDic[paramName] = getattr(self, paramName).get()
-          elif type == 'Simulation' and paramName.startswith("sim"):
-            paramsDic[paramName] = getattr(self, paramName).get()
-      return paramsDic
+        '''Return a dictionary as {paramName: param} of the stage parameters of the formulary.
+        Type'''
+        paramsDic = {}
+        for paramName, param in self._definition.iterAllParams():
+            if not paramName in self._omitParamNames and not isinstance(param, params.Group) and not isinstance(param,
+                                                                                                                params.Line):
+                if type == 'All':
+                    paramsDic[paramName] = param
+                elif type == 'Minimization' and paramName.startswith("min"):
+                    paramsDic[paramName] = getattr(self, paramName).get()
+                elif type == 'Heating' and paramName.startswith("heat"):
+                    paramsDic[paramName] = getattr(self, paramName).get()
+                elif type == 'Simulation' and paramName.startswith("sim"):
+                    paramsDic[paramName] = getattr(self, paramName).get()
+        return paramsDic
 
     def createMSJDic(self):
         msjDic = {}
@@ -404,6 +434,21 @@ class AmberMDSimulation(EMProtocol):
 
         return mdpFile
 
+    def customMDPFile(self, msjDic, type):
+        stageDir = self._getExtraPath(type)
+        os.makedirs(stageDir, exist_ok=True)
+
+        key = f"{self._key_map.get(type)}CustomIn"
+
+        # Get content, clean spaces, and ensure exactly one blank line at the end
+        params = msjDic.get(key, "").replace('\xa0', ' ').rstrip() + '\n\n'
+
+        mdpFile = os.path.join(stageDir, f"{type}.in")
+        with open(mdpFile, 'w') as f:
+            f.write(params)
+
+        return mdpFile
+
     def generateMDPFileNew(self, msjDic, type):
         '''Generate .in file'''
         stageDir = self._getExtraPath('{}'.format(type))
@@ -421,31 +466,31 @@ class AmberMDSimulation(EMProtocol):
                      'imin=0, nstlim={}, dt={}, ntf=2, ntc=2, tempi={}, ' \
                      'temp0={}, ntpr={} , ntwx={}, ntb=1, ntp=0, ntt=3, gamma_ln=2.0, ig=-1, ' \
                      'cut = 10.0 /'.format(msjDic['heatMDSteps'],
-                                         msjDic['heatTimeStep'],
-                                         msjDic['heatInTemp'],
-                                         msjDic['heatFiTemp'],
-                                         msjDic['heatTraj'],
-                                         msjDic['heatTraj'])
-            params += '\n &wt type=\'TEMP0\', istep1=0, istep2={}, value1={}, value2={} /\n'.format(msjDic['heatMDSteps'],
-                                                                                                  msjDic['heatInTemp'],
-                                                                                                  msjDic['heatFiTemp'],
-                                                                                                  msjDic['heatFiTemp'])
+                                           msjDic['heatTimeStep'],
+                                           msjDic['heatInTemp'],
+                                           msjDic['heatFiTemp'],
+                                           msjDic['heatTraj'],
+                                           msjDic['heatTraj'])
+            params += '\n &wt type=\'TEMP0\', istep1=0, istep2={}, value1={}, value2={} /\n'.format(
+                msjDic['heatMDSteps'],
+                msjDic['heatInTemp'],
+                msjDic['heatFiTemp'],
+                msjDic['heatFiTemp'])
         if type == 'Simulation':
             params = 'MD SIMULATION\n &cntrl \n' \
                      'imin=0, ntx=5, irest=1, nstlim={}, dt={}, ntf=2, ntc=2, ' \
                      'temp0={}, ntpr={} , ntwx={}, ntb=2, ntp=1, ntt=3, barostat=1, gamma_ln=2.0, ig=-1, ' \
                      'cut=10.0'.format(msjDic['simMDSteps'],
-                                          msjDic['simTimeStep'],
-                                          self.heatFiTemp.get(),
-                                          msjDic['simTraj'],
-                                          msjDic['simTraj'])
+                                       msjDic['simTimeStep'],
+                                       self.heatFiTemp.get(),
+                                       msjDic['simTraj'],
+                                       msjDic['simTraj'])
 
         params += '\n &end \n END'
         with open(mdpFile, 'w') as f:
             f.write(params)
 
         return mdpFile
-
 
     def callAmber(self, mdpFile, saveTrj=True):
         inputStructure = os.path.abspath(self.AmberSystem.get().getFileName())
@@ -517,14 +562,12 @@ class AmberMDSimulation(EMProtocol):
                       ' -o {}.o -ref {}.crd' \
                       ' -x {}.netcdf -inf {}.inf'.format(inputFile, crdFile, topFile, *[type] * 5)
 
-
         amberPlugin.runAmbertools(self, 'sander -O ', command, cwd=stageDir)
         if not saveTrj:
             trjFile = os.path.join(type, '{}.trr'.format(type))
             os.remove(trjFile)
 
         return os.path.join(stageDir, outFile)
-
 
     def checkIfPrevTrj(self, stageNum):
         if stageNum == '1':
