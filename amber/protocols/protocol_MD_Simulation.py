@@ -236,7 +236,7 @@ class AmberMDSimulation(EMProtocol):
         outFile = self.callAmberNew(mdpFile, 'Simulation')
 
     def createOutputStep(self):
-        CrdAmberFile, localTopFile = self._getPath('CrdFile.crd'), self._getPath('systemTopology.parm7')
+        CrdAmberFile, localTopFile = self._getPath('crdFile.crd'), self._getPath('systemTopology.parm7')
         shutil.copyfile(self.AmberSystem.get().getCrdFile(), CrdAmberFile)
         shutil.copyfile(self.AmberSystem.get().getTopologyFile(), localTopFile)
 
