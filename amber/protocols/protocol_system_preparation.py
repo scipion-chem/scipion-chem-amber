@@ -88,15 +88,15 @@ class AmberSystemPrep(EMProtocol):
                       important=True, pointerClass='SetOfSmallMolecules')
 
         group = form.addGroup('target modification options')
-        group.addParam('proteinResidues', params.BooleanParam, default=False,
+        group.addParam('targetProteinResidues', params.BooleanParam, default=False,
                        label='Keep only protein residues: ')
-        group.addParam('AmberCompatibleResidues', params.BooleanParam, default=False,
+        group.addParam('targetAmberCompatibleResidues', params.BooleanParam, default=False,
                        label='Keep only Amber compatible residues: ')
-        group.addParam('phSimulation', params.BooleanParam, default=False,
+        group.addParam('targetPhSimulation', params.BooleanParam, default=False,
                        label='Rename GLU, ASP, HIS for constant pH simulation: ')
-        group.addParam('reduce', params.BooleanParam, default=False,
+        group.addParam('targetReduce', params.BooleanParam, default=False,
                        label='Run reduce first to add hydrogens: ')
-        group.addParam('tleap', params.BooleanParam, default=False,
+        group.addParam('targetTleap', params.BooleanParam, default=False,
                        label='Use tleap to add missing atoms (EXPERIMENTAL): ')
 
         group = form.addGroup('ligand modifications options', condition='ligand == True')
@@ -129,31 +129,31 @@ class AmberSystemPrep(EMProtocol):
                                                   'systems. You should select as '
                                                   'many force fields as molecules in your system (i.e protein + ligand')
 
-        group.addParam('ProteinForceField', params.BooleanParam, allowsNull=True,
+        group.addParam('ProteinForceField', params.BooleanParam, allowsNull=True, default=True,
                        label='Protein Force Field')
         group.addParam('ProteinForceFieldType', params.EnumParam,
                        label='Type',
                        choices=['ff14SB', 'ff19SB', 'ff14SBonlysc', 'ff15ipq', 'fb15', 'ff03.r1', 'ff03ua'],
                        condition='ProteinForceField')
-        group.addParam('LigandForceField', params.BooleanParam, allowsNull=True, default= False, condition='ligand == True',
+        group.addParam('LigandForceField', params.BooleanParam, default= False, condition='ligand == True',
                        label='Ligand Force Field', help= 'if you have chosen to introduce a ligand, this force field is mandatory')
-        group.addParam('DNAForceField', params.BooleanParam, allowsNull=True,
+        group.addParam('DNAForceField', params.BooleanParam, default= False,
                        label='DNA Force Field')
-        group.addParam('RNAForceField', params.BooleanParam, allowsNull=True,
+        group.addParam('RNAForceField', params.BooleanParam, default= False,
                        label='RNA Force Field')
         group.addParam('RNAForceFieldType', params.EnumParam, condition='RNAForceField',
                        label='Type', choices=['OL3', 'LJbb', 'YIL', 'ROC', 'Shaw'])
-        group.addParam('LipidForceField', params.BooleanParam, allowsNull=True,
+        group.addParam('LipidForceField', params.BooleanParam, default= False,
                        label='Lipid Force Field')
         group.addParam('WaterForceField', params.EnumParam,
                        choices=['tip4pew', 'spce', 'spceb', 'opc', 'opc3', 'tip3p'],
                        allowsNull=True,
-                       label='Water Force Field: ',
+                       label='Water Force Field',
                        help='Force field applied to the water')
 
         group = form.addGroup('Disulfide bridges')
         group.addParam('DisulfideBridges', params.BooleanParam,
-                       label='Are there any S-S bridges?',
+                       label='Are there any S-S bridges?', default=False,
                        help='Residues involved must be renamed to CYX in the pdb file')
         group.addParam('DisulfideBridgesNumber', params.StringParam,
                        condition='DisulfideBridges',
@@ -162,7 +162,7 @@ class AmberSystemPrep(EMProtocol):
 
         group = form.addGroup('Solvate')
         group.addParam('SolvateStep', params.EnumParam,
-                       choices=['Cubic', 'Octahedric'], defalult='Octahedric',
+                       choices=['Cubic', 'Octahedric'], defalult='Cubic',
                        label='Solvation box',
                        help='Both solvation boxes will be isometric')
         line = group.addLine('Box size:')
@@ -270,18 +270,18 @@ class AmberSystemPrep(EMProtocol):
             inputStructure = self.convertPDB(inputStructure)
         systemBasename = os.path.basename(inputStructure.split(".")[0])
 
-        params = '{} > {}.amber.pdb -y '.format(inputStructure, systemBasename)
+        params = '{} -o {}_amber.pdb --dry'.format(inputStructure, systemBasename)
 
-        if self.proteinResidues:
-            params += '-p '
-        if self.AmberCompatibleResidues:
-            params += '-a '
-        if self.phSimulation:
-            params += '--constantph '
-        if self.reduce:
-            params += '--reduce '
-        if self.tleap:
-            params += '--add-missing-atoms '
+        if self.targetProteinResidues:
+            params += ' -p '
+        if self.targetAmberCompatibleResidues.get():
+            params += ' -a '
+        if self.targetPhSimulation.get():
+            params += ' --constantph '
+        if self.targetReduce.get():
+            params += ' --reduce '
+        if self.targetTleap.get():
+            params += ' --add-missing-atoms '
 
         amber.Plugin.runAmbertools(self, 'pdb4amber', params, cwd=self._getPath())
 
@@ -304,7 +304,7 @@ class AmberSystemPrep(EMProtocol):
         if self.WaterForceField:
             leapParams += 'source leaprc.water.{} \n'.format(self.getEnumText('WaterForceField'))
 
-        leapParams += 'APO = loadPdb {}.amber.pdb \n'.format(systemBasename)
+        leapParams += 'APO = loadPdb {}_amber.pdb \n'.format(systemBasename)
 
         if self.ligand == True:
 
@@ -336,7 +336,7 @@ class AmberSystemPrep(EMProtocol):
             elif self.getEnumText('WaterForceField') == 'opc':
                 leapParams += 'charge COMPL \n {} COMPL OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
             elif self.getEnumText('WaterForceField') == 'opc3':
-                leapParams += 'charge COMPL \n {} COMPL OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
+                leapParams += 'charge COMPL \n {} COMPL OPC3BOX {} iso \n'.format(Boxtype, self.Distance.get())
 
             leapParams += 'addIons COMPL Cl- 0 \n addIons COMPL Na+ 0 \n'
             leapParams += 'saveAmberParm COMPL {}.top {}.crd \n savepdb COMPL {}_system.pdb \n' \
