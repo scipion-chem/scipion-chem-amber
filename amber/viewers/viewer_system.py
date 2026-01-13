@@ -26,11 +26,9 @@
 import os, glob, subprocess
 import pyworkflow.viewer as pwviewer
 from pyworkflow.protocol import params
-from pwchem.viewers import PyMolViewer, PyMolView, VmdViewPopen, VmdViewPopen, MDSystemPViewer, MDSystemViewer
-from pwchem.objects import MDSystem
+from pwchem.viewers import PyMolViewer, PyMolView, VmdViewPopen, MDSystemPViewer
+from pwchem.viewers.viewers_data import PML_MD_STR
 
-
-from pwchem.viewers import PyMolViewer, PyMolView
 from pwchem.utils import natural_sort
 # from pwchem.constants import TCL_MD_STR, PML_MD_STR
 
@@ -39,7 +37,13 @@ from ..objects import AmberSystem
 from ..protocols import AmberMDSimulation
 from ..constants import *
 
-class MDSystemViewer(pwviewer.Viewer):
+PML_MD_STR = '''load {}
+load_traj {}, format=trj
+hide everything, not br. all within 3 of (byres polymer & name CA)
+set movie_fps, 15
+'''
+
+class AmberSystemViewer(pwviewer.Viewer):
   _label = 'Viewer Molecular Dynamics system'
   _environments = [pwviewer.DESKTOP_TKINTER]
   _targets = []
@@ -74,9 +78,9 @@ class AmberSystemPViewer(MDSystemPViewer):
     def _defineParams(self, form):
       super()._defineParams(form)
 
-    # def _showPymol(self, paramName=None):
-    #   system = self.getMDSystem()
-    #   return AmberSystemViewer(project=self.getProject())._visualize(system, onlySystem=True)
+    def _showMdPymol(self, paramName=None):
+      system = self.getMDSystem()
+      return AmberSystemViewer(project=self.getProject())._visualize(system)
 
     def _showMdVMD(self, paramName=None):
       system = self.getMDSystem()

@@ -208,12 +208,12 @@ class AmberMDSimulation(EMProtocol):
 
 
     def createOutputStep(self):
-        CrdAmberFile, localTopFile = self._getPath('CrdFile.crd'), self._getPath('systemTopology.top')
+        CrdAmberFile, localTopFile = self._getPath('CrdFile.crd'), self._getPath('systemTopology.parm7')
         shutil.copyfile(self.AmberSystem.get().getCrdFile(), CrdAmberFile)
         shutil.copyfile(self.AmberSystem.get().getTopologyFile(), localTopFile)
 
         outTrj = self.getSimTrajFile()
-        outputTrajectory = self._getPath('outputTrajectory.nc')
+        outputTrajectory = self._getPath('outputTrajectory.netcdf')
         shutil.copyfile(outTrj, outputTrajectory)
 
         system_visualization = self._getPath('system.pdb')
@@ -467,7 +467,7 @@ class AmberMDSimulation(EMProtocol):
 
         command = '-i {} -c {} -p {} -r {}.r \
                                        -o {}.o \
-                                       -x {}.nc \
+                                       -x {}.netcdf \
                                        -e {}.e \
                                        -ref {}.crd \
                                        -inf min.inf'.format(outFile, amberFile, topFile, *[stage] * 5)
@@ -509,14 +509,13 @@ class AmberMDSimulation(EMProtocol):
                 crdFile = os.path.abspath(os.path.join(self._getExtraPath(), 'Minimization', 'Minimization.ncrst'))
             command = '-i {} -c {} -p {} -r {}.ncrst' \
                       ' -o {}.o -ref {}.crd' \
-                      ' -x {}.nc -inf {}.inf'.format(inputFile, crdFile, topFile, *[type] * 5)
-
+                      ' -x {}.netcdf -inf {}.inf'.format(inputFile, crdFile, topFile, *[type] * 5)
 
         elif type == 'Simulation':
             crdFile = os.path.abspath(os.path.join(self._getExtraPath(), 'Heating', 'Heating.ncrst'))
             command = '-i {} -c {} -p {} -r {}.ncrst' \
                       ' -o {}.o -ref {}.crd' \
-                      ' -x {}.nc -inf {}.inf'.format(inputFile, crdFile, topFile, *[type] * 5)
+                      ' -x {}.netcdf -inf {}.inf'.format(inputFile, crdFile, topFile, *[type] * 5)
 
 
         amberPlugin.runAmbertools(self, 'sander -O ', command, cwd=stageDir)
@@ -533,7 +532,7 @@ class AmberMDSimulation(EMProtocol):
         else:
             prevDir = self._getExtraPath('stage_{}'.format(int(stageNum) - 1))
             for file in os.listdir(prevDir):
-                if '.nc' in file:
+                if '.netcdf' in file:
                     return os.path.join(prevDir, file)
         return False
 
@@ -543,7 +542,7 @@ class AmberMDSimulation(EMProtocol):
         for sDir in stagesDirs:
             cont = False
             for file in os.listdir(sDir):
-                if '.nc' in file:
+                if '.netcdf' in file:
                     trjFiles.append(os.path.abspath(os.path.join(sDir, file)))
                     cont = True
             if not cont:
@@ -552,7 +551,7 @@ class AmberMDSimulation(EMProtocol):
         return trjFiles
 
     def getSimTrajFile(self):
-        trjFile = os.path.join(self._getExtraPath(), 'Simulation', 'Simulation.nc')
+        trjFile = os.path.join(self._getExtraPath(), 'Simulation', 'Simulation.netcdf')
         return trjFile
 
     def countWarns(self, stageNum):
