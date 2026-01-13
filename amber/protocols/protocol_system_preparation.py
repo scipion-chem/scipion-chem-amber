@@ -339,7 +339,7 @@ class AmberSystemPrep(EMProtocol):
                 leapParams += 'charge COMPL \n {} COMPL OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
 
             leapParams += 'addIons COMPL Cl- 0 \n addIons COMPL Na+ 0 \n'
-            leapParams += 'saveAmberParm COMPL {}.top {}.crd \n savepdb COMPL {}_check.pdb \n' \
+            leapParams += 'saveAmberParm COMPL {}.top {}.crd \n savepdb COMPL {}_system.pdb \n' \
                       'quit'.format(systemBasename, systemBasename, systemBasename)
 
             file = open(self._getExtraPath("leap_commands.txt"), "w")
@@ -364,7 +364,7 @@ class AmberSystemPrep(EMProtocol):
                 leapParams += 'charge APO \n {} APO OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
 
             leapParams += 'addIons APO Cl- 0 \n addIons APO Na+ 0 \n'
-            leapParams += 'saveAmberParm APO {}.top {}.crd \n savepdb APO {}_check.pdb \n' \
+            leapParams += 'saveAmberParm APO {}.top {}.crd \n savepdb APO {}_system.pdb \n' \
                       'quit'.format(systemBasename, systemBasename, systemBasename)
 
             file = open(self._getExtraPath("leap_commands.txt"), "w")
@@ -379,16 +379,15 @@ class AmberSystemPrep(EMProtocol):
 
         topol_baseName = '{}.top'.format(systemBasename)
         crd_baseName = '{}.crd'.format(systemBasename)
-        check_baseName = '{}_check.pdb'.format(systemBasename)
+        system_baseName = '{}_system.pdb'.format(systemBasename)
 
 
         topol_localPath = abspath(self._getPath(topol_baseName))
         crd_localPath = abspath(self._getPath(crd_baseName))
-        check_localPath = abspath(self._getPath(check_baseName))
+        system_localPath = abspath(self._getPath(system_baseName))
 
-
-        amber_files = amberobj.AmberSystem(filename=crd_localPath, topoFile=topol_localPath,
-                                           checkFile=check_localPath, ff=self.getEnumText('ProteinForceFieldType'),
+        amber_files = amberobj.AmberSystem(filename=system_localPath, crdFile=crd_localPath, topoFile=topol_localPath,
+                                           ff=self.getEnumText('ProteinForceFieldType'),
                                            wff=self.getEnumText('WaterForceField'))
 
         self._defineOutputs(outputSystem=amber_files)
