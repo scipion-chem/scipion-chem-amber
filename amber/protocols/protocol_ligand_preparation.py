@@ -50,7 +50,8 @@ using the pdb4amber and Antechamber programs from AMEBERTOOLS
 
     _label = 'Ligand preparation'
 
-    _ChargeModel = ['RESP', 'AM1-BCC', 'CM1', 'CM2', 'ESP', 'Mulliken', 'Gasteiger',]
+    _ChargeModel = ['RESP', 'AM1-BCC', 'CM1', 'CM2', 'ESP', 'Mulliken', 'Gasteiger']
+    _ChargeModelWorking = ['AM1-BCC', 'Mulliken', 'Gasteiger']
     _Status = ['brief', 'default', 'verbose']
 
     # -------------------------- DEFINE constants ----------------------------
@@ -73,18 +74,27 @@ using the pdb4amber and Antechamber programs from AMEBERTOOLS
         form.addParam('inputLigand', params.StringParam,
                       label='Ligand to prepare: ',
                       help='Specific ligand to prepare in the system')
+        form.addParam('netCharge', params.IntParam, default=0, expertLevel=params.LEVEL_ADVANCED,
+                       label='Net Charge: ',
+                       help="Enter the integer net charge of the molecule. \n"
+                            "Common scenarios:\n"
+                            "- 0: Neutral molecules (most drugs/ligands).\n"
+                            "- -1: Deprotonated acids (e.g., carboxylates, phosphates).\n"
+                            "- +1: Protonated bases (e.g., amines at physiological pH).\n\n"
+                            "If antechamber reports an 'odd number of electrons', your charge is likely "
+                            "mismatched with your structure's protonation state.")
 
-        group = form.addGroup('pdb4amber options')
-        group.addParam('proteinResidues', params.BooleanParam, default=False,
-                       label='Keep only protein residues: ')
-        group.addParam('AmberCompatibleResidues', params.BooleanParam, default=False,
-                       label='Keep only Amber compatible residues: ')
-        group.addParam('phSimulation', params.BooleanParam, default=False,
-                       label='Rename GLU, ASP, HIS for constant pH simulation: ')
-        group.addParam('reduce', params.BooleanParam, default=False,
-                       label='Run reduce first to add hydrogens: ')
-        group.addParam('tleap', params.BooleanParam, default=False,
-                       label='Use tleap to add missing atoms (EXPERIMENTAL): ')
+        # group = form.addGroup('pdb4amber options')
+        # group.addParam('proteinResidues', params.BooleanParam, default=False,
+        #                label='Keep only protein residues: ')
+        # group.addParam('AmberCompatibleResidues', params.BooleanParam, default=False,
+        #                label='Keep only Amber compatible residues: ')
+        # group.addParam('phSimulation', params.BooleanParam, default=False,
+        #                label='Rename GLU, ASP, HIS for constant pH simulation: ')
+        # group.addParam('reduce', params.BooleanParam, default=False,
+        #                label='Run reduce first to add hydrogens: ')
+        # group.addParam('tleap', params.BooleanParam, default=False,
+        #                label='Use tleap to add missing atoms (EXPERIMENTAL): ')
 
         group = form.addGroup('Ligand parametrization')
         group.addParam('ChargeModel', params.EnumParam,
@@ -115,25 +125,16 @@ using the pdb4amber and Antechamber programs from AMEBERTOOLS
             shutil.copy(ligandFile, inputStructure)
 
         systemBasename = os.path.basename(inputStructure.split(".")[0])
-        params = '{} > {}.LIG.pdb --no-conect '.format(inputStructure, systemBasename)
+        params = '{} > {}_LIG.pdb '.format(inputStructure, systemBasename)
 
-        if self.proteinResidues:
-            params += '-p '
-        if self.AmberCompatibleResidues:
-            params += '-a '
-        if self.phSimulation:
-            params += '--constantph '
-        if self.reduce:
-            params += '--reduce '
-        if self.tleap:
-            params += '--add-missing-atoms '
-
-        amber.Plugin.runAmbertools(self, 'pdb4amber', params, cwd=self._getPath())
+        amber.Plugin.runAmbertools(self, 'reduce', params, cwd=self._getExtraPath())
 
     def antechamberStep(self):
         systemBasename = self.getInputBaseName()
+        nc = self.netCharge.get()
 
-        params = ' -i {}.LIG.pdb -fi pdb -o {}.LIG.mol2 -fo mol2 '.format(*[systemBasename]*2)
+        params = ' -i {}_LIG.pdb -fi pdb -o {}_LIG.mol2 -fo mol2 -nc {} '.format(*[systemBasename]*2,nc)
+
 
         if self.getEnumText('ChargeModel') == 'RESP':
             params += '-c resp '
@@ -157,23 +158,23 @@ using the pdb4amber and Antechamber programs from AMEBERTOOLS
         if self.getEnumText('Status') == 'verbose':
             params += '-s 2'
 
-        amber.Plugin.runAmbertools(self, 'antechamber', params, cwd=self._getPath())
+        amber.Plugin.runAmbertools(self, 'antechamber', params, cwd=self._getExtraPath())
 
     def parmStep(self):
         systemBasename = self.getInputBaseName()
-        params = '-i {}.LIG.mol2 -o {}.LIG.frcmod -f mol2 '.format(*[systemBasename]*2)
+        params = '-i {}_LIG.mol2 -o {}_LIG.frcmod -f mol2 '.format(*[systemBasename]*2)
 
-        amber.Plugin.runAmbertools(self, 'parmchk2', params, cwd=self._getPath())
+        amber.Plugin.runAmbertools(self, 'parmchk2', params, cwd=self._getExtraPath())
 
     def leapStep(self):
         # inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
         # systemBasename = os.path.basename(inputStructure.split(".")[0])
         systemBasename = self.getInputBaseName()
         params = 'source leaprc.gaff \n' \
-                 'LIG = loadmol2 {}.LIG.mol2 \n' \
-                 'loadamberparams {}.LIG.frcmod \n' \
-                 'saveoff LIG {}.lig.lib \n' \
-                 'saveamberparm LIG {}.LIG.top {}.LIG.crd \n' \
+                 'LIG = loadmol2 {}_LIG.mol2 \n' \
+                 'loadamberparams {}_LIG.frcmod \n' \
+                 'saveoff LIG {}_lig.lib \n' \
+                 'saveamberparm LIG {}_LIG.top {}_LIG.crd \n' \
                  'savepdb LIG {}.check.pdb \n' \
                  'quit'.format(*[systemBasename]*6)
 
@@ -181,18 +182,18 @@ using the pdb4amber and Antechamber programs from AMEBERTOOLS
         file.write(params)
         file.close()
 
-        amber.Plugin.runAmbertools(self, 'tleap ', "-f extra/leap_commands.txt", cwd=self._getPath())
+        amber.Plugin.runAmbertools(self, 'tleap ', "-f leap_commands.txt", cwd=self._getExtraPath())
 
 
     def createOutputStep(self):
         systemBasename = self.getInputBaseName()
 
-        topol_baseName = '{}.LIG.top'.format(systemBasename)
-        crd_baseName = '{}.LIG.crd'.format(systemBasename)
-        lib_baseName = '{}.LIG.lib'.format(systemBasename)
-        origin_baseName = '{}.LIG.pdb'.format(systemBasename)
+        topol_baseName = '{}_LIG.top'.format(systemBasename)
+        crd_baseName = '{}_LIG.crd'.format(systemBasename)
+        lib_baseName = '{}_LIG.lib'.format(systemBasename)
+        origin_baseName = '{}_LIG.pdb'.format(systemBasename)
         check_baseName = '{}_checkLIG.pdb'.format(systemBasename)
-        missingparams_baseName = '{}.LIG.frcmod'.format(systemBasename)
+        missingparams_baseName = '{}_LIG.frcmod'.format(systemBasename)
 
         topol_localPath = abspath(self._getPath(topol_baseName))
         crd_localPath = abspath(self._getPath(crd_baseName))
@@ -201,7 +202,7 @@ using the pdb4amber and Antechamber programs from AMEBERTOOLS
         check_localPath = abspath(self._getPath(check_baseName))
         missingparams_localPath = abspath(self._getPath(missingparams_baseName))
 
-        amber_system = amberobj.AmberSystem(fileLIGname=crd_localPath, topoLIGFile=topol_localPath,
+        amber_system = amberobj.AmberSystem(crdLIGname=crd_localPath, topoLIGFile=topol_localPath,
                                            libFile=lib_localPath, originLIGFile=origin_localPath,
                                            checkLIGFile=check_localPath, missingFile=missingparams_localPath)
 
