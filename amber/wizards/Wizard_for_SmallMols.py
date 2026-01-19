@@ -30,9 +30,9 @@ from pwchem.wizards import *
 from amber.protocols import *
 
 SelectElementWizard().addTarget(protocol=AmberSystemPrep,
-                                targets=['inputLigandSelect'],
-                                inputs=['inputLigands'],
-                                outputs=['inputLigandSelect'])
+                                targets=['inputLigand'],
+                                inputs=['inputSetOfMols'],
+                                outputs=['inputLigand'])
 
 SelectElementWizard().addTarget(protocol=AmberLigandPrep,
                                 targets=['inputLigand'],

@@ -27,7 +27,7 @@ import os, glob, subprocess
 import pyworkflow.viewer as pwviewer
 from pyworkflow.protocol import params
 from pwchem.viewers import PyMolViewer, PyMolView, VmdViewPopen, MDSystemPViewer
-from pwchem.viewers.viewers_data import PML_MD_STR
+# from pwchem.viewers.viewers_data import PML_MD_STR
 
 from pwchem.utils import natural_sort
 # from pwchem.constants import TCL_MD_STR, PML_MD_STR
