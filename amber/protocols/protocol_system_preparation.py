@@ -27,6 +27,7 @@
 """
 This module will prepare the system for the simulation
 """
+from email.policy import default
 from os.path import relpath, abspath
 
 import os
@@ -84,7 +85,7 @@ class AmberSystemPrep(EMProtocol):
         iGroup.addParam('inputFrom', params.EnumParam, default=STRUCTURE,
                         label='Input from: ', choices=['AtomStruct', 'SetOfSmallMolecules'],
                         help='Type of input you want to use')
-        iGroup.addParam('inputStructure', params.PointerParam, pointerClass='SchrodingerAtomStruct, AtomStruct',
+        iGroup.addParam('inputStructure', params.PointerParam, pointerClass='AtomStruct',
                         label='Input structure to be prepared for MD:', condition='inputFrom==0', allowsNull=True,
                         help='Atomic structure to be prepared for MD by solvation, ions addition etc')
         iGroup.addParam('inputSetOfMols', params.PointerParam, pointerClass='SetOfSmallMolecules',
@@ -101,7 +102,7 @@ class AmberSystemPrep(EMProtocol):
                        label='Keep only Amber compatible residues: ')
         group.addParam('targetPhSimulation', params.BooleanParam, default=False,
                        label='Rename GLU, ASP, HIS for constant pH simulation: ')
-        group.addParam('targetReduce', params.BooleanParam, default=False,
+        group.addParam('targetReduce', params.BooleanParam, default=True,
                        label='Run reduce first to add hydrogens: ')
         group.addParam('targetTleap', params.BooleanParam, default=False,
                        label='Use tleap to add missing atoms (EXPERIMENTAL): ')
@@ -125,7 +126,7 @@ class AmberSystemPrep(EMProtocol):
         # group.addParam('ChargeModel', params.EnumParam,
         #                choices=self._ChargeModel, allowsNull=True,
         #                label='Choose the charge model in order to calculate the atomic point charges: ')
-        form.addParam('Status', params.EnumParam, allowsNull=True,
+        form.addParam('Status', params.EnumParam, allowsNull=True, default=1,
                        choices=self._Status,
                        label='Choose status information: ')
 
@@ -141,7 +142,8 @@ class AmberSystemPrep(EMProtocol):
                        label='Protein Force Field')
         group.addParam('ProteinFF', params.EnumParam,
                        label='Type',
-                       choices=['ff14SB', 'ff19SB', 'ff14SBonlysc', 'ff15ipq', 'fb15', 'ff03.r1', 'ff03ua'])
+                       choices=['ff14SB', 'ff19SB', 'ff14SBonlysc', 'ff15ipq', 'fb15', 'ff03.r1', 'ff03ua'],
+                       default='0')
         group.addParam('ligandCharge', params.EnumParam, default=2, choices=['AM1-BCC', 'Mulliken', 'Gasteiger'],
                       condition = LIG_INPUT, label="Small molecules charge: ",
                       help='Method to calculate the charges of the ligand')
@@ -165,7 +167,7 @@ class AmberSystemPrep(EMProtocol):
         #                label='Type', choices=['OL3', 'LJbb', 'YIL', 'ROC', 'Shaw'])
         # group.addParam('LipidForceField', params.BooleanParam, default= False,
         #                label='Lipid Force Field')
-        group.addParam('WaterForceField', params.EnumParam,
+        group.addParam('WaterForceField', params.EnumParam, default=1,
                        choices=['tip4pew', 'spce', 'spceb', 'opc', 'opc3', 'tip3p'],
                        allowsNull=True,
                        label='Water Force Field',
@@ -181,7 +183,7 @@ class AmberSystemPrep(EMProtocol):
                              'with format 1º Residue - 2º Residue / 1º Residue - 2º Residue')
 
         group = form.addGroup('Solvate')
-        group.addParam('SolvateStep', params.EnumParam,
+        group.addParam('SolvateStep', params.EnumParam, default=0,
                        choices=['Cubic', 'Octahedric'], defalult='Cubic',
                        label='Solvation box',
                        help='Both solvation boxes will be isometric')
@@ -315,13 +317,15 @@ class AmberSystemPrep(EMProtocol):
         if self.targetTleap.get():
             params += ' --add-missing-atoms '
 
-        amber.Plugin.runAmbertools(self, 'pdb4amber', params, cwd=self.getPDBFileDir())
+        amber.Plugin.runAmbertools(self, 'pdb4amber', params, cwd=self.getTargetFileDir())
 
     def forceFieldStep(self):
-        inputStructure = self.findFile(self.getPDBFileDir(), '_amber.pdb')
+        inputStructure = self.findFile(self.getTargetFileDir(), '_amber.pdb')
         systemBasename = os.path.basename(inputStructure.split(".")[0])
-        complexBasename = os.path.basename(self.findFile(self.getLigandFileDir(),'.sdf').split(".")[0])
-
+        if self.inputFrom.get() == LIGAND:
+            targetBasename = os.path.basename(self.findFile(self.LigandFileDir(),'.sdf').split(".")[0])
+        else:
+            targetBasename = os.path.basename(self.getReceptorPDB().split(".")[0])
         leapParams = ''
 
         if self.ProteinForceField:
@@ -343,8 +347,10 @@ class AmberSystemPrep(EMProtocol):
             leapParams += 'source leaprc.gaff2 \n'
             leapParams += 'LIG = loadmol2 {}\n'.format(self.findFile(self.getLigandFileDir(),'.mol2'))
             leapParams += 'loadamberparams {}\n'.format(self.findFile(self.getLigandFileDir(),'.frcmod'))
-            leapParams += 'COMPL = combine { APO LIG }\n'
+            leapParams += 'HOLO = combine { APO LIG }\n'
             leapParams += 'loadoff {}\n'.format(self.findFile(self.getLigandFileDir(),'.lib'))
+        else:
+            leapParams += 'HOLO = APO \n'
 
         if self.getEnumText('SolvateStep') == 'Cubic':
             Boxtype = 'SolvateBox'
@@ -352,34 +358,34 @@ class AmberSystemPrep(EMProtocol):
             Boxtype = 'SolvateOct'
 
         if self.getEnumText('WaterForceField') == 'tip3p':
-            leapParams += 'charge COMPL \n {} COMPL TIP3PBOX {} iso \n'.format(Boxtype, self.Distance.get())
+            leapParams += 'charge HOLO \n {} HOLO TIP3PBOX {} iso \n'.format(Boxtype, self.Distance.get())
         elif self.getEnumText('WaterForceField') == 'tip4pew':
-            leapParams += 'charge COMPL \n {} COMPL TIP4PEWBOX {} iso \n'.format(Boxtype, self.Distance.get())
+            leapParams += 'charge HOLO \n {} HOLO TIP4PEWBOX {} iso \n'.format(Boxtype, self.Distance.get())
         elif self.getEnumText('WaterForceField') == 'spece':
-            leapParams += 'charge COMPL \n {} COMPL SPCEBOX {} iso \n'.format(Boxtype, self.Distance.get())
+            leapParams += 'charge HOLO \n {} HOLO SPCEBOX {} iso \n'.format(Boxtype, self.Distance.get())
         elif self.getEnumText('WaterForceField') == 'opc':
-            leapParams += 'charge COMPL \n {} COMPL OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
+            leapParams += 'charge HOLO \n {} HOLO OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
         elif self.getEnumText('WaterForceField') == 'opc3':
-            leapParams += 'charge COMPL \n {} COMPL OPC3BOX {} iso \n'.format(Boxtype, self.Distance.get())
+            leapParams += 'charge HOLO \n {} HOLO OPC3BOX {} iso \n'.format(Boxtype, self.Distance.get())
 
-        leapParams += 'addIons COMPL Cl- 0 \n addIons COMPL Na+ 0 \n'
-        leapParams += 'savepdb COMPL {}.pdb\n'.format(complexBasename)
-        leapParams += 'saveAmberParm COMPL {}.top {}.crd \n savepdb COMPL {}_system.pdb \n' \
-                      'quit'.format(complexBasename, complexBasename, complexBasename)
+        leapParams += 'addIons HOLO Cl- 0 \n addIons HOLO Na+ 0 \n'
+        leapParams += 'savepdb HOLO {}.pdb\n'.format(targetBasename)
+        leapParams += 'saveAmberParm HOLO {}.top {}.crd \n savepdb HOLO {}_system.pdb \n' \
+                      'quit'.format(targetBasename, targetBasename, targetBasename)
 
-        file = open(os.path.join(self.getComplexFileDir(),"leap_commands.txt"), "w")
+        file = open(os.path.join(self.getTargetFileDir(),"leap_commands.txt"), "w")
         file.write(leapParams)
         file.close()
 
-        amber.Plugin.runAmbertools(self, 'tleap ', "-f leap_commands.txt", cwd=self.getComplexFileDir())
+        amber.Plugin.runAmbertools(self, 'tleap ', "-f leap_commands.txt", cwd=self.getTargetFileDir())
 
     def createOutputStep(self):
         systemBasename = self.getSystemName()
-        complexDir = self.getComplexFileDir()
+        targetDir = self.getTargetFileDir()
 
-        srcTop = self.findFile(complexDir, '.top')
-        srcCrd = self.findFile(complexDir, '.crd')
-        srcSystemPdb = self.findFile(complexDir, '_system.pdb')
+        srcTop = self.findFile(targetDir, '.top')
+        srcCrd = self.findFile(targetDir, '.crd')
+        srcSystemPdb = self.findFile(targetDir, '_system.pdb')
 
         destTop = abspath(self._getPath(f'{systemBasename}.parm7'))
         destCrd = abspath(self._getPath(f'{systemBasename}.rst7'))
@@ -389,17 +395,16 @@ class AmberSystemPrep(EMProtocol):
         shutil.copy(srcCrd, destCrd)
         shutil.copy(srcSystemPdb, destSystemPdb)
 
-        print(destSystemPdb)
-
-        amberSystem = amberobj.AmberSystem(filename=destSystemPdb, crdFile=destCrd, topoFile=destTop,
+        createdSystem = amberobj.AmberSystem(filename=destSystemPdb, crdFile=destCrd, topoFile=destTop,
                                            ff=self.getEnumText('ProteinFF'),
                                            wff=self.getEnumText('WaterForceField'))
+
         if self.inputFrom.get() == LIGAND:
             molFile = self.findFile(self.getLigandFileDir(), '.mol2')
-            amberSystem.setLigTopologyFile(molFile)
+            createdSystem.setLigTopologyFile(molFile)
 
-        self._defineOutputs(outputSystem=amberSystem)
-        self._defineSourceRelation(self.inputLigand, amberSystem)
+        self._defineOutputs(outputSystem=createdSystem)
+        # self._defineSourceRelation(self.inputLigand, createdSystem)
 
     # --------------------------- INFO functions -----------------------------------
     def getReceptorPDB(self):
@@ -457,17 +462,12 @@ class AmberSystemPrep(EMProtocol):
         os.mkdir(lDir)
       return lDir
 
-    def getPDBFileDir(self):
+    def getTargetFileDir(self):
       tDir = os.path.abspath(self._getExtraPath('target'))
       if not os.path.exists(tDir):
         os.mkdir(tDir)
       return tDir
 
-    def getComplexFileDir(self):
-      cDir = os.path.abspath(self._getExtraPath('complex'))
-      if not os.path.exists(cDir):
-        os.mkdir(cDir)
-      return cDir
 
     def convertPDB(self, proteinFile):
         inName, inExt = os.path.splitext(os.path.basename(proteinFile))

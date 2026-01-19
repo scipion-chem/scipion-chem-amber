@@ -40,7 +40,6 @@ class AmberSystem(MDSystem):
 
     def __init__(self, filename=None, **kwargs):
         super().__init__(filename=filename, **kwargs)
-        self._checkFile = pwobj.String(kwargs.get('checkFile', None))
         self._libFile = pwobj.String(kwargs.get('libFile', None))
         self._originFile = pwobj.String(kwargs.get('originFile', None))
         self._missingFile = pwobj.String(kwargs.get('missingFile', None))
@@ -50,12 +49,6 @@ class AmberSystem(MDSystem):
     def __str__(self):
         return '{} ({}, hasTrj={})'.format(self.getClassName(), os.path.basename(self.getSystemFile()),
                                            self.hasTrajectory())
-
-    def getCheckFile(self):
-        return self._checkFile.get()
-
-    def setCheckFile(self, value):
-        self._checkFile.set(value)
 
     def getCrdFile(self):
         return self._crdFile.get()

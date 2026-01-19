@@ -50,7 +50,7 @@ class AmberMDSimulation(EMProtocol):
          "system prepartion". This step is necessary to energy minimize the system in order to avoid unwanted conformations.
     """
 
-    _label = 'Molecular dynamics simulation'
+    _label = 'system simulation'
     _ensemTypes = ['no periodicity', 'NVT', 'NPT']
 
     _thermostats = ['no', 'Andersen', 'Langevin', 'Nose-Hoover', 'Nose-Hoover RESPA', 'Berendsen']
@@ -72,7 +72,7 @@ class AmberMDSimulation(EMProtocol):
         """ Define the input parameters that will be used.
         """
         form.addSection('Input')
-        form.addParam('AmberSystem', params.PointerParam, label="Input Amber System: ",
+        form.addParam('amberSystem', params.PointerParam, label="Input Amber System: ",
                       pointerClass='AmberSystem',
                       allowsNull=True,
                       help='Amber solvated system to be simulated')
@@ -237,15 +237,15 @@ class AmberMDSimulation(EMProtocol):
 
     def createOutputStep(self):
         CrdAmberFile, localTopFile = self._getPath('crdFile.crd'), self._getPath('systemTopology.parm7')
-        shutil.copyfile(self.AmberSystem.get().getCrdFile(), CrdAmberFile)
-        shutil.copyfile(self.AmberSystem.get().getTopologyFile(), localTopFile)
+        shutil.copyfile(self.amberSystem.get().getCrdFile(), CrdAmberFile)
+        shutil.copyfile(self.amberSystem.get().getTopologyFile(), localTopFile)
 
         outTrj = self.getSimTrajFile()
         outputTrajectory = self._getPath('outputTrajectory.netcdf')
         shutil.copyfile(outTrj, outputTrajectory)
 
         system_visualization = self._getPath('system.pdb')
-        shutil.copyfile(self.AmberSystem.get().getFileName(), system_visualization)
+        shutil.copyfile(self.amberSystem.get().getFileName(), system_visualization)
 
         outSystem = AmberSystem(filename=system_visualization)
 
@@ -493,7 +493,7 @@ class AmberMDSimulation(EMProtocol):
         return mdpFile
 
     def callAmber(self, mdpFile, saveTrj=True):
-        inputStructure = os.path.abspath(self.AmberSystem.get().getFileName())
+        inputStructure = os.path.abspath(self.amberSystem.get().getFileName())
         systemBasename = os.path.basename(inputStructure.split(".")[0])
 
         stageDir = os.path.dirname(mdpFile)
@@ -501,8 +501,8 @@ class AmberMDSimulation(EMProtocol):
         stageNum = stage.replace('stage_', '').strip()
         amberFile = self.getPrevFinishedStageFiles(stage)
         outFile = '{}.in'.format(stage)
-        topFile = self.AmberSystem.get().getTopologyFile()
-        crdFile = self.AmberSystem.get().get
+        topFile = self.amberSystem.get().getTopologyFile()
+        crdFile = self.amberSystem.get().get
         print(stageDir)
 
         if self.checkIfPrevTrj(stageNum):
@@ -531,13 +531,13 @@ class AmberMDSimulation(EMProtocol):
         return os.path.join(stageDir, outFile)
 
     def callAmberNew(self, mdpFile, type, saveTrj=True):
-        inputStructure = os.path.abspath(self.AmberSystem.get().getFileName())
+        inputStructure = os.path.abspath(self.amberSystem.get().getFileName())
         systemBasename = os.path.basename(inputStructure.split(".")[0])
         stageDir = os.path.dirname(mdpFile)
 
         inputFile = '{}.in'.format(type)
-        topFile = self.AmberSystem.get().getTopologyFile()
-        crdFile = self.AmberSystem.get().getCrdFile()
+        topFile = self.amberSystem.get().getTopologyFile()
+        crdFile = self.amberSystem.get().getCrdFile()
         outFile = '{}.o'.format(type)
 
         # if self.checkIfPrevTrj(stageNum):
