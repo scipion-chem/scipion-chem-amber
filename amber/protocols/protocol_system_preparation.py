@@ -143,8 +143,8 @@ class AmberSystemPrep(EMProtocol):
                        label='Type',
                        choices=['ff14SB', 'ff19SB', 'ff14SBonlysc', 'ff15ipq', 'fb15', 'ff03.r1', 'ff03ua'])
         group.addParam('ligandCharge', params.EnumParam, default=2, choices=['AM1-BCC', 'Mulliken', 'Gasteiger'],
-                      condition = LIG_INPUT, label="Small molecules force field: ",
-                      help='Small molecules force field to use')
+                      condition = LIG_INPUT, label="Small molecules charge: ",
+                      help='Method to calculate the charges of the ligand')
         group.addParam('ligandFF', params.EnumParam, default=2, choices=['AM1-BCC', 'Mulliken', 'Gasteiger'],
                        condition=LIG_INPUT, label="Small molecules force field: ",
                        help='Small molecules force field to use')
