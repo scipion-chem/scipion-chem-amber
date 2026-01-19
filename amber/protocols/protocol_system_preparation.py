@@ -241,7 +241,7 @@ class AmberSystemPrep(EMProtocol):
         nc = self.netCharge.get()
 
         # params = ' -i {}.LIG.pdb -fi pdb -o {}.LIG.mol2 -fo mol2 '.format(*[systemBasename]*2)
-        params = ' -i {} -fi sdf -o {} -fo mol2 -nc {} '.format(molFile, prepLigFile, nc)
+        params = ' -i {} -fi sdf -o {} -fo mol2 -nc {} -rn LIG '.format(molFile, prepLigFile, nc)
 
         if self.getEnumText('ligandCharge') == 'RESP':
             params += '-c resp '
