@@ -49,7 +49,7 @@ class AmberMDSimulation(EMProtocol):
         This protocol will perform energy minimization and equilibrium on the system previously prepared by the protocol
          "system prepartion". This step is necessary to energy minimize the system in order to avoid unwanted conformations.
     """
-
+    _amberEngines = ['sander', 'pmemd']
     _label = 'system simulation'
     _ensemTypes = ['no periodicity', 'NVT', 'NPT']
 
@@ -71,6 +71,13 @@ class AmberMDSimulation(EMProtocol):
     def _defineParams(self, form):
         """ Define the input parameters that will be used.
         """
+        form.addHidden(params.USE_GPU, params.BooleanParam, default=True,
+                       label="Use GPU for execution: ",
+                       help="This protocol has both CPU and GPU implementation.\
+                                                         Select the one you want to use.")
+        form.addHidden(params.GPU_LIST, params.StringParam, default='0', label="Choose GPU IDs",
+                       help="Add a list of GPU devices that can be used")
+
         form.addSection('Input')
         form.addParam('amberSystem', params.PointerParam, label="Input Amber System: ",
                       pointerClass='AmberSystem',
@@ -94,7 +101,7 @@ class AmberMDSimulation(EMProtocol):
         line.addParam('minIntCutoff', params.FloatParam, default=8.0,
                       label='Interaction cutoff', condition='energyMin')
         group.addParam('minCustomIn', params.TextParam, width=60, readOnly=True, default=None,
-                       label='Input sander', expertLevel=params.LEVEL_ADVANCED, condition='energyMin',
+                       label='Input sander/pmemd', expertLevel=params.LEVEL_ADVANCED, condition='energyMin',
                        help='Upload a custom configuration file for the Minimization step.'
                             'Providing a file here will override all other Minimization parameters defined in the interface. For detailed syntax and options, '
                             'refer to the Amber Manual https://ambermd.org/doc12/Amber25.pdf.')
@@ -110,9 +117,9 @@ class AmberMDSimulation(EMProtocol):
         group.addParam('heatFiTemp', params.FloatParam, default=300,
                        label='Final temperature (K)')
         group.addParam('heatTraj', params.IntParam, default=1000,
-                       label='Trajectory step', help='The coordinates are written to a mdcrd file x times.')
+                       label='Trajectory step size', help='The coordinates are written to a mdcrd file x times.')
         group.addParam('heatCustomIn', params.TextParam, width=60, readOnly=True, default=None,
-                       label='Input sander', expertLevel=params.LEVEL_ADVANCED,
+                       label='Input sander/pmemd', expertLevel=params.LEVEL_ADVANCED,
                        help='Upload a custom configuration file for the Heating step.'
                             'Providing a file here will override all other Heating parameters defined in the interface. For detailed syntax and options, '
                             'refer to the Amber Manual https://ambermd.org/doc12/Amber25.pdf.')
@@ -123,10 +130,10 @@ class AmberMDSimulation(EMProtocol):
                        help='Number of MD steps in run (nstlim * dt = run length in ps)')
         group.addParam('simTimeStep', params.FloatParam, default=0.002,
                        label='Time step (ps)')
-        group.addParam('simTraj', params.IntParam, default=1000,
-                       label='Trajectory step', help='The trajectory coordinates are written to a traj file x times.')
+        group.addParam('simTrajStep', params.IntParam, default=1000,
+                       label='Trajectory step size', help='The trajectory coordinates are written to a traj file every x steps.')
         group.addParam('simCustomIn', params.TextParam, width=60, readOnly=True, default=None,
-                       label='Input sander', expertLevel=params.LEVEL_ADVANCED,
+                       label='Input sander/pmemd', expertLevel=params.LEVEL_ADVANCED,
                        help='Upload a custom configuration file for the MD simulation.'
                             'Providing a file here will override all other simulation parameters defined in the interface. For detailed syntax and options, '
                             'refer to the Amber Manual https://ambermd.org/doc12/Amber25.pdf.')
@@ -240,14 +247,18 @@ class AmberMDSimulation(EMProtocol):
         shutil.copyfile(self.amberSystem.get().getCrdFile(), CrdAmberFile)
         shutil.copyfile(self.amberSystem.get().getTopologyFile(), localTopFile)
 
-        outTrj = self.getSimTrajFile()
+        outTrj = self.getSimTrajStepFile()
         outputTrajectory = self._getPath('outputTrajectory.netcdf')
         shutil.copyfile(outTrj, outputTrajectory)
 
-        system_visualization = self._getPath('system.pdb')
+        system_visualization = self._getPath(os.path.basename(self.amberSystem.get().getFileName()))
         shutil.copyfile(self.amberSystem.get().getFileName(), system_visualization)
 
-        outSystem = AmberSystem(filename=system_visualization)
+        mFF, wFF = self.getFFFiles()
+        nFrames = self.getNFrames()
+        nTime = nFrames * self.simTimeStep.get()
+
+        outSystem = AmberSystem(filename=system_visualization, ff=mFF, wff=wFF, nFrames=nFrames, nTime=nTime)
 
         outSystem.setTopologyFile(localTopFile)
         if outTrj:
@@ -483,8 +494,8 @@ class AmberMDSimulation(EMProtocol):
                      'cut=10.0'.format(msjDic['simMDSteps'],
                                        msjDic['simTimeStep'],
                                        self.heatFiTemp.get(),
-                                       msjDic['simTraj'],
-                                       msjDic['simTraj'])
+                                       msjDic['simTrajStep'],
+                                       msjDic['simTrajStep'])
 
         params += '\n &end \n END'
         with open(mdpFile, 'w') as f:
@@ -562,7 +573,17 @@ class AmberMDSimulation(EMProtocol):
                       ' -o {}.o -ref {}.crd' \
                       ' -x {}.netcdf -inf {}.inf'.format(inputFile, crdFile, topFile, *[type] * 5)
 
-        amberPlugin.runAmbertools(self, 'sander -O ', command, cwd=stageDir)
+        print(command)
+
+        if self.useGpu.get():
+            os.environ["CUDA_VISIBLE_DEVICES"] = self.gpuList.get()
+            amberPlugin.runPmemd(self, ' -O ', args=command, cwd=stageDir)
+
+        else:
+            # Use sander for CPU execution
+            engine = 'sander'
+            amberPlugin.runAmbertools(self, 'sander -O ', command, cwd=stageDir)
+
         if not saveTrj:
             trjFile = os.path.join(type, '{}.trr'.format(type))
             os.remove(trjFile)
@@ -593,7 +614,7 @@ class AmberMDSimulation(EMProtocol):
         trjFiles.reverse()
         return trjFiles
 
-    def getSimTrajFile(self):
+    def getSimTrajStepFile(self):
         trjFile = os.path.join(self._getExtraPath(), 'Simulation', 'Simulation.netcdf')
         return trjFile
 
@@ -603,3 +624,11 @@ class AmberMDSimulation(EMProtocol):
             if warn.split()[1] in ['all', str(stageNum)]:
                 nWarns += 1
         return nWarns
+
+    def getNFrames(self):
+      nFrames = self.simMDSteps.get() // self.simTrajStep.get()
+      return nFrames
+
+    def getFFFiles(self):
+      system = self.amberSystem.get()
+      return system.getForceField(), system.getWaterForceField()

@@ -28,16 +28,17 @@ import pwem
 
 from pyworkflow import join
 
-from amber.constants import AMBER_HOME, V2020, V2025, AMBER, AMBER_DEFAULT_VERSION
+from amber.constants import *
 from pwem.convert.atom_struct import getEnviron
 
 _logo = "icon.png"
 _references = ['Salomon-Ferrer2013']
 
+AMBER_DIC = {'name': 'amber', 'version': 'AMBER_DEFAULT_VERSION', 'home': 'AMBER_HOME', 'pmemd_home': 'PMEMD_HOME'}
 
 class Plugin(pwem.Plugin):
-    _homeVar = AMBER_HOME
-    _pathVars = [AMBER_HOME]
+    _homeVar = AMBER_DIC['home']
+    _pathVars = [AMBER_DIC['home'], AMBER_DIC['pmemd_home']]
     _supportedVersions = [V2020, V2025]
     _amberName = 'ambertools-25'
     _pluginHome = join(pwem.Config.EM_ROOT, _amberName)
@@ -47,7 +48,8 @@ class Plugin(pwem.Plugin):
     def _defineVariables(cls):
         """ Return and write a variable in the config file.
         """
-        cls._defineEmVar(AMBER_HOME, cls._amberName)
+        cls._defineEmVar(AMBER_DIC['home'], cls._amberName)
+        cls._defineEmVar(AMBER_DIC['pmemd_home'], 'pmemd24')
         cls._defineVar("AMBERTOOLS_ENV_ACTIVATION", 'conda activate %s' % cls._Ambertools25Env)
 
     @classmethod
@@ -90,7 +92,18 @@ class Plugin(pwem.Plugin):
     def getEnviron_amber(cls):
         pass
 
-    # ---------------------------------- Utils functions  -----------------------
     @classmethod
     def runAmber(cls, self, param, params, cwd):
         pass
+
+    @classmethod
+    def getPmemdBin(cls, prog='pmemd.cuda'):
+        """ Retorna la ruta al binario pmemd configurado. """
+        return join(cls.getVar(AMBER_DIC['pmemd_home']), 'bin', prog)
+
+    @classmethod
+    def runPmemd(cls, protocol, program, args, gpu=False, cwd=None):
+        fullProgram = '%s %s && %s ' % (cls.getCondaActivationCmd(), cls.getAmbertoolsEnvActivation(), cls.getPmemdBin())
+        protocol.runJob(fullProgram, args, env=cls.getEnviron_amber(), cwd=cwd)
+
+    # ---------------------------------- Utils functions  -----------------------

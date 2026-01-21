@@ -323,7 +323,7 @@ class AmberSystemPrep(EMProtocol):
         inputStructure = self.findFile(self.getTargetFileDir(), '_amber.pdb')
         systemBasename = os.path.basename(inputStructure.split(".")[0])
         if self.inputFrom.get() == LIGAND:
-            targetBasename = os.path.basename(self.findFile(self.LigandFileDir(),'.sdf').split(".")[0])
+            targetBasename = os.path.basename(self.findFile(self.getLigandFileDir(),'.sdf').split(".")[0])
         else:
             targetBasename = os.path.basename(self.getReceptorPDB().split(".")[0])
         leapParams = ''

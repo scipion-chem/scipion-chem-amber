@@ -45,10 +45,17 @@ class AmberSystem(MDSystem):
         self._missingFile = pwobj.String(kwargs.get('missingFile', None))
         self._topoFile = pwobj.String(kwargs.get('topoFile', None))
         self._crdFile = pwobj.String(kwargs.get('crdFile', None))
+        self._repFile = pwobj.String(kwargs.get('repFile', None))
+
+        self._nFrames = pwobj.Integer(kwargs.get('nFrames', None))
+        self._nTime = pwobj.Float(kwargs.get('nTime', None))
 
     def __str__(self):
-        return '{} ({}, hasTrj={})'.format(self.getClassName(), os.path.basename(self.getSystemFile()),
-                                           self.hasTrajectory())
+        strStr = '{} ({}'.format(self.getClassName(), os.path.basename(self.getSystemFile()))
+        if self.hasTrajectory():
+            strStr += f', frames: {self._nFrames.get()}, time(ps): {self._nTime.get()}'
+        strStr += ')'
+        return strStr
 
     def getCrdFile(self):
         return self._crdFile.get()
@@ -58,6 +65,18 @@ class AmberSystem(MDSystem):
 
     def getLibFile(self):
         return self._libFile.get()
+
+    def getReportFile(self):
+        return self._repFile.get()
+
+    def setReportFile(self, value):
+        self._repFile.set(value)
+
+    def getNFrames(self):
+        return self._nFrames.get()
+
+    def getNTime(self):
+        return self._nTime.get()
 
     def setLibFile(self, value):
         self._libFile.set(value)
