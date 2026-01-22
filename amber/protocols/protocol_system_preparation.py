@@ -143,13 +143,14 @@ class AmberSystemPrep(EMProtocol):
         group.addParam('ProteinFF', params.EnumParam,
                        label='Type',
                        choices=['ff14SB', 'ff19SB', 'ff14SBonlysc', 'ff15ipq', 'fb15', 'ff03.r1', 'ff03ua'],
-                       default='0')
+                       default=0)
         group.addParam('ligandCharge', params.EnumParam, default=2, choices=['AM1-BCC', 'Mulliken', 'Gasteiger'],
-                      condition = LIG_INPUT, label="Small molecules charge: ",
-                      help='Method to calculate the charges of the ligand')
-        group.addParam('ligandFF', params.EnumParam, default=2, choices=['AM1-BCC', 'Mulliken', 'Gasteiger'],
-                       condition=LIG_INPUT, label="Small molecules force field: ",
-                       help='Small molecules force field to use')
+                       condition=LIG_INPUT, label="Small molecules charge method: ",
+                       help='Small molecules charge method to use')
+        group.addParam('ligandFF', params.EnumParam, default=1, choices=['gaff', 'gaff2', 'ESPALOMA'],
+                      condition=LIG_INPUT, label="Small molecules force field: ",
+                      help='Small molecules force field to use')
+
         group.addParam('netCharge', params.IntParam, default=0, expertLevel=params.LEVEL_ADVANCED,
                       label='Net Charge: ',
                       help="Enter the integer net charge of the molecule. \n"
@@ -279,17 +280,16 @@ class AmberSystemPrep(EMProtocol):
         # systemBasename = os.path.basename(inputStructure.split(".")[0])
         molFile = self.findFile(self.getLigandFileDir(),'.mol2')
         frcmodFile = self.findFile(self.getLigandFileDir(),'.frcmod')
-        print(frcmodFile)
         molName = os.path.basename(frcmodFile.split(".")[0])
+        ligFF = self.getEnumText('ligandFF')
 
-
-        params = 'source leaprc.gaff \n' \
+        params = 'source leaprc.{} \n' \
                  'LIG = loadmol2 {} \n' \
                  'loadamberparams {} \n' \
                  'saveoff LIG {}.lib \n' \
-                 'saveamberparm LIG {}_LIG.top {}_LIG.crd \n' \
+                 'saveamberparm LIG {}_LIG.prmtop {}_LIG.crd \n' \
                  'savepdb LIG {}.check.pdb \n' \
-                 'quit'.format(molFile, frcmodFile, *[molName]*4)
+                 'quit'.format(ligFF, molFile, frcmodFile, *[molName]*4)
 
         file = open(os.path.join(self.getLigandFileDir(),"leap_commands.txt"), "w")
         file.write(params)
@@ -344,11 +344,13 @@ class AmberSystemPrep(EMProtocol):
                 leapParams += 'bond APO.{}.SG APO.{}.SG \n'.format(first, second)
 
         if self.inputFrom.get() == LIGAND:
-            leapParams += 'source leaprc.gaff2 \n'
+            ligFF = self.getEnumText('ligandFF')
+
+            leapParams += 'source leaprc.{} \n'.format(ligFF)
+            leapParams += 'loadoff {}\n'.format(self.findFile(self.getLigandFileDir(),'.lib'))
             leapParams += 'LIG = loadmol2 {}\n'.format(self.findFile(self.getLigandFileDir(),'.mol2'))
             leapParams += 'loadamberparams {}\n'.format(self.findFile(self.getLigandFileDir(),'.frcmod'))
             leapParams += 'HOLO = combine { APO LIG }\n'
-            leapParams += 'loadoff {}\n'.format(self.findFile(self.getLigandFileDir(),'.lib'))
         else:
             leapParams += 'HOLO = APO \n'
 
@@ -370,7 +372,7 @@ class AmberSystemPrep(EMProtocol):
 
         leapParams += 'addIons HOLO Cl- 0 \n addIons HOLO Na+ 0 \n'
         leapParams += 'savepdb HOLO {}.pdb\n'.format(targetBasename)
-        leapParams += 'saveAmberParm HOLO {}.top {}.crd \n savepdb HOLO {}_system.pdb \n' \
+        leapParams += 'saveAmberParm HOLO {}.prmtop {}.crd \n savepdb HOLO {}_system.pdb \n' \
                       'quit'.format(targetBasename, targetBasename, targetBasename)
 
         file = open(os.path.join(self.getTargetFileDir(),"leap_commands.txt"), "w")
@@ -383,7 +385,7 @@ class AmberSystemPrep(EMProtocol):
         systemBasename = self.getSystemName()
         targetDir = self.getTargetFileDir()
 
-        srcTop = self.findFile(targetDir, '.top')
+        srcTop = self.findFile(targetDir, '.prmtop')
         srcCrd = self.findFile(targetDir, '.crd')
         srcSystemPdb = self.findFile(targetDir, '_system.pdb')
 
