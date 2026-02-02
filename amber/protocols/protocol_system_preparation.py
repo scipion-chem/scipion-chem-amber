@@ -144,6 +144,9 @@ class AmberSystemPrep(EMProtocol):
                        label='Type',
                        choices=['ff14SB', 'ff19SB', 'ff14SBonlysc', 'ff15ipq', 'fb15', 'ff03.r1', 'ff03ua'],
                        default=0)
+        group.addParam('protNetCharge', params.IntParam, default=0, expertLevel=params.LEVEL_ADVANCED,
+                      label='Target net charge: ',
+                      help="Enter the integer net charge of the molecule. \n")
         group.addParam('ligandCharge', params.EnumParam, default=2, choices=['AM1-BCC', 'Mulliken', 'Gasteiger'],
                        condition=LIG_INPUT, label="Small molecules charge method: ",
                        help='Small molecules charge method to use')
@@ -151,13 +154,9 @@ class AmberSystemPrep(EMProtocol):
                       condition=LIG_INPUT, label="Small molecules force field: ",
                       help='Small molecules force field to use')
 
-        group.addParam('netCharge', params.IntParam, default=0, expertLevel=params.LEVEL_ADVANCED,
-                      label='Net Charge: ',
+        group.addParam('ligNetCharge', params.IntParam, default=0, expertLevel=params.LEVEL_ADVANCED,
+                      label='Ligand net charge: ', condition=LIG_INPUT,
                       help="Enter the integer net charge of the molecule. \n"
-                           "Common scenarios:\n"
-                           "- 0: Neutral molecules (most drugs/ligands).\n"
-                           "- -1: Deprotonated acids (e.g., carboxylates, phosphates).\n"
-                           "- +1: Protonated bases (e.g., amines at physiological pH).\n\n"
                            "If antechamber reports an 'odd number of electrons', your charge is likely "
                            "mismatched with your structure's protonation state.")
         # group.addParam('DNAForceField', params.BooleanParam, default= False,
@@ -241,7 +240,7 @@ class AmberSystemPrep(EMProtocol):
         molName = os.path.basename(molFile).split(".")[0]
         prepLigFile = f'{molName}_prep.mol2'
 
-        nc = self.netCharge.get()
+        nc = self.ligNetCharge.get()
 
         # params = ' -i {}.LIG.pdb -fi pdb -o {}.LIG.mol2 -fo mol2 '.format(*[systemBasename]*2)
         params = ' -i {} -fi sdf -o {} -fo mol2 -nc {} -rn LIG '.format(molFile, prepLigFile, nc)
