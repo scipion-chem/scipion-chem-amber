@@ -51,16 +51,17 @@ class AmberMDSimulation(EMProtocol):
     """
     _amberEngines = ['sander', 'pmemd']
     _label = 'system simulation'
-    _ensemTypes = ['no periodicity', 'NVT', 'NPT']
+    _ensemTypes = [ 'NVT', 'NPT']
+    _thermostats = ['Andersen', 'Langevin', 'Nose-Hoover', 'Nose-Hoover RESPA', 'Berendsen']
+    _barostats = ['Berendsen', 'Monte Carlo']
 
-    _thermostats = ['no', 'Andersen', 'Langevin', 'Nose-Hoover', 'Nose-Hoover RESPA', 'Berendsen']
-    _barostats = ['no', 'Berendsen', 'Monte Carlo']
     _coupleStyle = ['No pressure scaling', 'isotropic', 'anisotropic', 'semiisotropic']
 
     _shakeAlgorithm = ['Shake not performed', 'Bonds involving hydrogens are constrains', 'all bonds are constrained']
 
     _omitParamNames = ['runName', 'runMode', 'insertStep', 'summarySteps', 'deleteStep', 'watchStep',
                        'workFlowSteps', 'hostName', 'numberOfThreads', 'numberOfMpi']
+
     _key_map = {'Minimization': 'min', 'Heating': 'heat', 'Simulation': 'sim'}
 
     # -------------------------- DEFINE constants ----------------------------
@@ -137,31 +138,33 @@ class AmberMDSimulation(EMProtocol):
                        help='Upload a custom configuration file for the MD simulation.'
                             'Providing a file here will override all other simulation parameters defined in the interface. For detailed syntax and options, '
                             'refer to the Amber Manual https://ambermd.org/doc12/Amber25.pdf.')
-        #
-        # group = form.addGroup('Ensemble')
-        #
-        # group.addParam('ensemType', params.EnumParam,
-        #                label='Simulation type: ',
-        #                choices=self._ensemTypes, default=0,
-        #                help='Type of simulation to perform in the step: Energy minimization, NVT or NPT\n')
-        #
-        # line = group.addLine('Temperature settings: ', condition='ensemType!=0',
-        #                      help='Temperature during the simulation (K)\nThermostat type\n'
-        #                           'Relaxation time constant for thermostat (ps)')
-        # line.addParam('temperature', params.FloatParam, default=300, condition='ensemType!=0',
-        #               label='Temperature: ')
-        # line.addParam('thermostat', params.EnumParam, default=5, condition='ensemType!=0',
-        #               label='Thermostat: ', choices=self._thermostats)
-        #
-        # line = group.addLine('Pressure settings: ', condition='ensemType==2',
-        #                      help='Pressure during the simulation (bar)\nBarostat type\n'
-        #                           'Relaxation time constant for barostat (ps)')
-        # line.addParam('pressure', params.FloatParam, default=1.0,
-        #               label='   Pressure (bar):   ')
-        # line.addParam('pressureDynamics', params.EnumParam, default=0,
-        #               label='  Pressure dynamics type:   ', choices=self._coupleStyle)
-        # line.addParam('barostat', params.EnumParam, default=1,
-        #               label='  Barostat type:   ', choices=self._barostats)
+        group = form.addGroup('Ensemble')
+
+        group.addParam('ensemType', params.EnumParam,
+                       label='Simulation type: ',
+                       choices=self._ensemTypes, default=0,
+                       help='Type of simulation to perform: no periodicity, NVT or NPT\n')
+        line = group.addLine('Temperature control: ',
+                             help='Temperature during the simulation (K)\nThermostat type\n'
+                                  'Relaxation time constant for thermostat (ps)')
+        line.addParam('thermostat', params.EnumParam, default=1,
+                      label='Thermostat: ', choices=self._thermostats)
+        line.addParam('collisFreq', params.FloatParam, default=2.0,
+                      label='Collision frequency (1/ps): ', condition='thermostat==1')
+        line.addParam('coupConst', params.FloatParam, default=2.0,
+                      label='Coupling constant (1/ps): ', condition='thermostat==2')
+        line.addParam('fricConst', params.FloatParam, default=2.0,
+                      label='Friction constant (1/ps): ', condition='thermostat==3')
+
+        line = group.addLine('Pressure control: ', condition='ensemType==1',
+                             help='Pressure during the simulation (bar)\nBarostat type\n'
+                                  'Relaxation time constant for barostat (ps)')
+        line.addParam('pressure', params.FloatParam, default=1.0, condition='ensemType==1',
+                      label='Pressure (bar): ')
+        line.addParam('barostat', params.EnumParam, default=2, condition='ensemType==1',
+                      label='Barostat type: ', choices=self._barostats)
+        line.addParam('pressureScaling', params.EnumParam, default=2, condition='ensemType==1',
+                      label='Pressure scaling: ', choices=self._coupleStyle)
         # line = group.addLine('SHAKE algorithm : ', help='In SHAKE algorithm, the system of non-linear constraint '
         #                                                 'equations is solved using the Gauss–Seidel method which '
         #                                                 'approximates the solution of the linear system of equations '
@@ -202,7 +205,7 @@ class AmberMDSimulation(EMProtocol):
         if self.energyMin.get():
             self._insertFunctionStep('minimizationStep')
         self._insertFunctionStep('heatingStep')
-        self._insertFunctionStep('simStep')
+        self._insertFunctionStep('simulationStep')
         self._insertFunctionStep('createOutputStep')
 
     def simulateStageStep(self, wStep, i):
@@ -222,7 +225,7 @@ class AmberMDSimulation(EMProtocol):
         else:
             mdpFile = self.generateMDPFileNew(msjDic, 'Minimization')
 
-        outFile = self.callAmberNew(mdpFile, 'Minimization')
+        outFile = self.callAmber(mdpFile, 'Minimization')
 
     def heatingStep(self):
         msjDic = self.getStageParamsDicNew('Heating')
@@ -231,16 +234,16 @@ class AmberMDSimulation(EMProtocol):
         else:
             mdpFile = self.generateMDPFileNew(msjDic, 'Heating')
 
-        outFile = self.callAmberNew(mdpFile, 'Heating')
+        outFile = self.callAmber(mdpFile, 'Heating')
 
-    def simStep(self):
+    def simulationStep(self):
         msjDic = self.getStageParamsDicNew('Simulation')
         if self.simCustomIn.get():
             mdpFile = self.customMDPFile(msjDic, 'Simulation')
         else:
             mdpFile = self.generateMDPFileNew(msjDic, 'Simulation')
 
-        outFile = self.callAmberNew(mdpFile, 'Simulation')
+        outFile = self.callAmber(mdpFile, 'Simulation')
 
     def createOutputStep(self):
         CrdAmberFile, localTopFile = self._getPath('crdFile.crd'), self._getPath('systemTopology.parm7')
@@ -381,7 +384,7 @@ class AmberMDSimulation(EMProtocol):
         os.mkdir(stageDir)
         mdpFile = os.path.join(stageDir, 'stage_{}.in'.format(mdpStage))
 
-        params = '\n &cntrl \n' \
+        params = '\n&cntrl \n' \
                  '      dt={},' \
                  ' nstlim={}, ntwr=50, ntwx=50, ntwe=50, '.format(msjDic['timeStep'],
                                                                   int(msjDic['simTime'] / msjDic['timeStep']))
@@ -391,9 +394,7 @@ class AmberMDSimulation(EMProtocol):
         else:
             params += ' imin=0,'
 
-        if msjDic['ensemType'] == 'no periodicity':
-            params += ' ntb=0, cut=99'
-        elif msjDic['ensemType'] == 'NVT':
+        if msjDic['ensemType'] == 'NVT':
             params += ' ntb=1,'
         elif msjDic['ensemType'] == 'NPT':
             params += ' ntb=2,'
@@ -403,7 +404,7 @@ class AmberMDSimulation(EMProtocol):
         if msjDic['thermostat'] == 'Andersen':
             params += ' ntt=2,'
         if msjDic['thermostat'] == 'Langevin':
-            params += ' ntt=3,'
+            params += ' ntt=3, gamma ln=2.0'
         if msjDic['thermostat'] == 'Nose-Hoove':
             params += ' ntt=9,'
         if msjDic['thermostat'] == 'Nose-Hoover RESPA':
@@ -438,7 +439,7 @@ class AmberMDSimulation(EMProtocol):
         if msjDic['Shake'] == 'all bonds are constrained':
             params += ' ntc=3,'
 
-        params += '\n &end \n END'
+        params += '\n&end \nEND'
         print(msjDic)
         with open(mdpFile, 'w') as f:
             f.write(params)
@@ -468,80 +469,136 @@ class AmberMDSimulation(EMProtocol):
 
         params = ''
         if type == 'Minimization':
-            params = 'MINIMIZATION\n &cntrl \n' \
+            params = 'MINIMIZATION\n&cntrl \n' \
                      'imin=1, ntx=1, irest=0, maxcyc={}, ncyc={},ntpr=100,' \
                      ' ntwx=0, cut={}'.format(msjDic['minMaxCycles'], msjDic['minSdCycles'], msjDic['minIntCutoff'])
 
         if type == 'Heating':
-            params = 'HEATING\n &cntrl \n' \
+            params = 'HEATING\n&cntrl \n' \
                      'imin=0, nstlim={}, dt={}, ntf=2, ntc=2, tempi={}, ' \
-                     'temp0={}, ntpr={} , ntwx={}, ntb=1, ntp=0, ntt=3, gamma_ln=2.0, ig=-1, ' \
-                     'cut = 10.0 /'.format(msjDic['heatMDSteps'],
+                     'temp0={}, ntpr={} , ntwx={}, ntb=1, ntp=0, ig=-1, ' \
+                     'cut=8.0 /'.format(msjDic['heatMDSteps'],
                                            msjDic['heatTimeStep'],
                                            msjDic['heatInTemp'],
                                            msjDic['heatFiTemp'],
                                            msjDic['heatTraj'],
                                            msjDic['heatTraj'])
-            params += '\n &wt type=\'TEMP0\', istep1=0, istep2={}, value1={}, value2={} /\n'.format(
+            params += self.addThermostatParams(msjDic)
+            params += '\n&wt type=\'TEMP0\', istep1=0, istep2={}, value1={}, value2={} /\n'.format(
                 msjDic['heatMDSteps'],
                 msjDic['heatInTemp'],
                 msjDic['heatFiTemp'],
                 msjDic['heatFiTemp'])
         if type == 'Simulation':
-            params = 'MD SIMULATION\n &cntrl \n' \
+            params = 'MD SIMULATION\n&cntrl \n' \
                      'imin=0, ntx=5, irest=1, nstlim={}, dt={}, ntf=2, ntc=2, ' \
-                     'temp0={}, ntpr={} , ntwx={}, ntb=2, ntp=1, ntt=3, barostat=1, gamma_ln=2.0, ig=-1, ' \
-                     'cut=10.0'.format(msjDic['simMDSteps'],
+                     'temp0={}, ntpr={} , ntwx={}, ig=-1, ' \
+                     'cut=8.0'.format(msjDic['simMDSteps'],
                                        msjDic['simTimeStep'],
                                        self.heatFiTemp.get(),
                                        msjDic['simTrajStep'],
                                        msjDic['simTrajStep'])
+            params += self.addThermostatParams(msjDic)
+            params += self.addBarostatParams(msjDic)
 
-        params += '\n &end \n END'
+        params += '\n&end \nEND'
         with open(mdpFile, 'w') as f:
             f.write(params)
 
+        print('sander/pmemd.cuda input params are:\n {}'.format(params))
+
         return mdpFile
 
-    def callAmber(self, mdpFile, saveTrj=True):
-        inputStructure = os.path.abspath(self.amberSystem.get().getFileName())
-        systemBasename = os.path.basename(inputStructure.split(".")[0])
+    def addThermostatParams(self, msjDic):
+        ntt = None
+        gamma_ln = None
+        thermostat = self.getEnumText('thermostat')
+        if thermostat == 'Andersen':
+            ntt = 2
+        elif thermostat == 'Langevin':
+            ntt = 3
+            gamma_ln = self.collisFreq.get()
+        elif thermostat == 'Nose-Hoove':
+            ntt = 9
+            gamma_ln = self.coupConst.get()
+        elif thermostat == 'Nose-Hoover RESPA':
+            ntt = 10
+            gamma_ln = self.fricConst.get()
+        elif thermostat == 'Berendsen':
+            ntt = 11
 
-        stageDir = os.path.dirname(mdpFile)
-        stage = os.path.split(stageDir)[-1]
-        stageNum = stage.replace('stage_', '').strip()
-        amberFile = self.getPrevFinishedStageFiles(stage)
-        outFile = '{}.in'.format(stage)
-        topFile = self.amberSystem.get().getTopologyFile()
-        crdFile = self.amberSystem.get().get
-        print(stageDir)
+        params = []
+        if ntt is not None:
+            params.append(f"\nntt={ntt}")
+        if gamma_ln is not None:
+            params.append(f"gamma_ln={gamma_ln}")
 
-        if self.checkIfPrevTrj(stageNum):
-            prevTrjStr = '-t ' + os.path.abspath(self.checkIfPrevTrj(stageNum))
+        return ", ".join(params)
+
+    def addBarostatParams(self, msjDic):
+        ntp = None
+        barostat = None
+        pres0 = None
+        if self.getEnumText('ensemType') == 'NPT':
+            pres0 = self.pressure.get()
+            ntb = 2
+            barosParam = self.getEnumText('barostat')
+            pressScaParam = self.getEnumText('pressureScaling')
+            if pressScaParam == 'isotropic':
+                ntp=1
+            if pressScaParam == 'anisotropic':
+                ntp=2
+            if pressScaParam == 'semiisotropic':
+                ntp=3
+            if barosParam == 'Berendsen':
+                barostat=1
+            elif barosParam == 'Monte Carlo':
+                barostat=2
         else:
-            prevTrjStr = ''
+            ntp=0
+            ntb = 1
+        params = []
+        if ntp is not None:
+            params.append(f"\nntb={ntb}, ntp={ntp}, pres0={pres0}, barostat={barostat}")
 
-        command = '-i {} -c {} -p {} -r {}.r \
-                                       -o {}.o \
-                                       -x {}.netcdf \
-                                       -e {}.e \
-                                       -ref {}.crd \
-                                       -inf min.inf'.format(outFile, amberFile, topFile, *[stage] * 5)
+        return ", ".join(params)
 
-        # Manage warnings
-        nWarns = self.countWarns(stageNum)
-        print('{} warnings in stage {}'.format(nWarns, stageNum))
-        if nWarns >= 1:
-            command += ' -maxwarn {}'.format(nWarns)
+    # def callAmber(self, mdpFile, saveTrj=True):
+    #     inputStructure = os.path.abspath(self.amberSystem.get().getFileName())
+    #     systemBasename = os.path.basename(inputStructure.split(".")[0])
+    #
+    #     stageDir = os.path.dirname(mdpFile)
+    #     stage = os.path.split(stageDir)[-1]
+    #     stageNum = stage.replace('stage_', '').strip()
+    #     amberFile = self.getPrevFinishedStageFiles(stage)
+    #     outFile = '{}.in'.format(stage)
+    #     topFile = self.amberSystem.get().getTopologyFile()
+    #     crdFile = self.amberSystem.get().get
+    #     print(stageDir)
+    #
+    #     if self.checkIfPrevTrj(stageNum):
+    #         prevTrjStr = '-t ' + os.path.abspath(self.checkIfPrevTrj(stageNum))
+    #     else:
+    #         prevTrjStr = ''
+    #
+    #     command = '-i {} -c {} -p {} -r {}.r \
+    #                 -o {}.o -x {}.netcdf -e {}.e -ref {}.crd \
+    #                 -inf min.inf'.format(outFile, amberFile, topFile, *[stage] * 5)
+    #
+    #     # Manage warnings
+    #     nWarns = self.countWarns(stageNum)
+    #     print('{} warnings in stage {}'.format(nWarns, stageNum))
+    #     if nWarns >= 1:
+    #         command += ' -maxwarn {}'.format(nWarns)
+    #
+    #     amberPlugin.runAmbertools(self, 'sander -O ', command, cwd=stageDir)
+    #     if not saveTrj:
+    #         trjFile = os.path.join(stageDir, '{}.trr'.format(stage))
+    #         os.remove(trjFile)
+    #
+    #     return os.path.join(stageDir, outFile)
 
-        amberPlugin.runAmbertools(self, 'sander -O ', command, cwd=stageDir)
-        if not saveTrj:
-            trjFile = os.path.join(stageDir, '{}.trr'.format(stage))
-            os.remove(trjFile)
-
-        return os.path.join(stageDir, outFile)
-
-    def callAmberNew(self, mdpFile, type, saveTrj=True):
+    def callAmber(self, mdpFile, type, saveTrj=True):
         inputStructure = os.path.abspath(self.amberSystem.get().getFileName())
         systemBasename = os.path.basename(inputStructure.split(".")[0])
         stageDir = os.path.dirname(mdpFile)
@@ -556,10 +613,9 @@ class AmberMDSimulation(EMProtocol):
         # else:
         #     prevTrjStr = ''
         if type == 'Minimization':
-            command = '-i {} -c {} -p {} -r {}.ncrst \
-                                           -o {}.o \
-                                           -ref {}.crd \
-                                           -inf {}.inf'.format(inputFile, crdFile, topFile, *[type] * 4)
+            command = '-i {} -c {} -p {} -r {}.ncrst -o {}.o' \
+                       ' -ref {}.crd' \
+                       ' -inf {}.inf'.format(inputFile, crdFile, topFile, *[type] * 4)
         elif type == 'Heating':
             if self.energyMin.get():
                 crdFile = os.path.abspath(os.path.join(self._getExtraPath(), 'Minimization', 'Minimization.ncrst'))
@@ -572,8 +628,6 @@ class AmberMDSimulation(EMProtocol):
             command = '-i {} -c {} -p {} -r {}.ncrst' \
                       ' -o {}.o -ref {}.crd' \
                       ' -x {}.netcdf -inf {}.inf'.format(inputFile, crdFile, topFile, *[type] * 5)
-
-        print(command)
 
         if self.useGpu.get():
             os.environ["CUDA_VISIBLE_DEVICES"] = self.gpuList.get()
@@ -617,13 +671,6 @@ class AmberMDSimulation(EMProtocol):
     def getSimTrajStepFile(self):
         trjFile = os.path.join(self._getExtraPath(), 'Simulation', 'Simulation.netcdf')
         return trjFile
-
-    def countWarns(self, stageNum):
-        nWarns = 0
-        for warn in self._warnings():
-            if warn.split()[1] in ['all', str(stageNum)]:
-                nWarns += 1
-        return nWarns
 
     def getNFrames(self):
       nFrames = self.simMDSteps.get() // self.simTrajStep.get()
