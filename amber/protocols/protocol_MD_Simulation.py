@@ -50,7 +50,7 @@ class AmberMDSimulation(EMProtocol):
          "system prepartion". This step is necessary to energy minimize the system in order to avoid unwanted conformations.
     """
     _amberEngines = ['sander', 'pmemd']
-    _label = 'system simulation'
+    _label = 'run MD simulation'
     _ensemTypes = [ 'NVT', 'NPT']
     _thermostats = ['Andersen', 'Langevin', 'Nose-Hoover', 'Nose-Hoover RESPA', 'Berendsen']
     _barostats = ['Berendsen', 'Monte Carlo']
@@ -161,7 +161,7 @@ class AmberMDSimulation(EMProtocol):
                                   'Relaxation time constant for barostat (ps)')
         line.addParam('pressure', params.FloatParam, default=1.0, condition='ensemType==1',
                       label='Pressure (bar): ')
-        line.addParam('barostat', params.EnumParam, default=2, condition='ensemType==1',
+        line.addParam('barostat', params.EnumParam, default=1, condition='ensemType==1',
                       label='Barostat type: ', choices=self._barostats)
         line.addParam('pressureScaling', params.EnumParam, default=2, condition='ensemType==1',
                       label='Pressure scaling: ', choices=self._coupleStyle)
@@ -193,13 +193,6 @@ class AmberMDSimulation(EMProtocol):
         # group.addParam('workFlowSteps', params.TextParam, label='User transparent', condition='False')
 
     # --------------------------- STEPS functions ------------------------------
-    def _insertAllStepsOld(self):
-        self.createGUISummary()
-        i = 1
-        for wStep in self.workFlowSteps.get().strip().split('\n'):
-            self._insertFunctionStep('simulateStageStep', wStep, i)
-            i += 1
-        self._insertFunctionStep('createOutputStep')
 
     def _insertAllSteps(self):
         if self.energyMin.get():
@@ -499,7 +492,8 @@ class AmberMDSimulation(EMProtocol):
                                        msjDic['simTrajStep'],
                                        msjDic['simTrajStep'])
             params += self.addThermostatParams(msjDic)
-            params += self.addBarostatParams(msjDic)
+            if self.getEnumText('ensemType') == 'NPT':
+                params += self.addBarostatParams(msjDic)
 
         params += '\n&end \nEND'
         with open(mdpFile, 'w') as f:
@@ -536,30 +530,39 @@ class AmberMDSimulation(EMProtocol):
         return ", ".join(params)
 
     def addBarostatParams(self, msjDic):
-        ntp = None
-        barostat = None
-        pres0 = None
+        params = []
+
         if self.getEnumText('ensemType') == 'NPT':
             pres0 = self.pressure.get()
             ntb = 2
-            barosParam = self.getEnumText('barostat')
+
             pressScaParam = self.getEnumText('pressureScaling')
+            barosParam = self.getEnumText('barostat')
+
             if pressScaParam == 'isotropic':
-                ntp=1
-            if pressScaParam == 'anisotropic':
-                ntp=2
-            if pressScaParam == 'semiisotropic':
-                ntp=3
+                ntp = 1
+            elif pressScaParam == 'anisotropic':
+                ntp = 2
+            elif pressScaParam == 'semiisotropic':
+                ntp = 3
+            else:
+                ntp = 0
+
             if barosParam == 'Berendsen':
-                barostat=1
+                barostat = 1
             elif barosParam == 'Monte Carlo':
-                barostat=2
+                barostat = 2
+            else:
+                barostat = 0
+
+            params.append(
+                f"\nntb={ntb}, ntp={ntp}, pres0={pres0}, barostat={barostat}"
+            )
+
         else:
-            ntp=0
+            ntp = 0
             ntb = 1
-        params = []
-        if ntp is not None:
-            params.append(f"\nntb={ntb}, ntp={ntp}, pres0={pres0}, barostat={barostat}")
+            params.append(f"\nntb={ntb}, ntp={ntp}")
 
         return ", ".join(params)
 

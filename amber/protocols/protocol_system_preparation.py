@@ -31,14 +31,14 @@ from email.policy import default
 from os.path import relpath, abspath
 
 import os
-
+import re
 import numpy as np
 
 from pwem.protocols import EMProtocol, ProtImportFiles
 from pyworkflow.protocol import params
 from pyworkflow.utils import Message
 
-from pwchem.constants import RDKIT_DIC
+from pwchem.constants import RDKIT_DIC, OPENBABEL_DIC
 from pwchem.utils import getBaseName, convertToSdf
 from pwchem import Plugin as pwchemPlugin
 
@@ -48,6 +48,7 @@ from pwchem.utils import runOpenBabel
 
 import amber.objects as amberobj
 from amber.objects import *
+from amber.constants import AMBER_DIC
 
 scriptLigPrepName = 'rdkit_addHydrogens.py'
 
@@ -58,7 +59,6 @@ class AmberSystemPrep(EMProtocol):
     """
     This protocol will prepare a system for MD simulation. It will clean the input PDB for further analysis
     and generate topology and coordinate files necessary for MD simulation.
-
     """
 
     _label = 'system preparation'
@@ -95,7 +95,7 @@ class AmberSystemPrep(EMProtocol):
                         label='Ligand to prepare: ',
                         help='Specific ligand to prepare in the system')
 
-        group = form.addGroup('target modification options')
+        group = form.addGroup('Target modification options')
         group.addParam('targetProteinResidues', params.BooleanParam, default=False,
                        label='Keep only protein residues: ')
         group.addParam('targetAmberCompatibleResidues', params.BooleanParam, default=False,
@@ -106,6 +106,23 @@ class AmberSystemPrep(EMProtocol):
                        label='Run reduce first to add hydrogens: ')
         group.addParam('targetTleap', params.BooleanParam, default=False,
                        label='Use tleap to add missing atoms (EXPERIMENTAL): ')
+
+        form.addParam('tMem', params.BooleanParam, default=False,
+                      label='Model a transmembrane protein',
+                      help='Embed the protein in a lipid bilayer')
+
+        # Membrane params
+        group = form.addGroup('Membrane options', condition='tMem')
+        group.addParam('memLipids', params.StringParam, default='POPC',
+                       label='Lipid composition:',
+                       help='Lipids to embed the protein, use : for separating different lipids (e.g., "POPC:CHL1"). '
+                            'Use "//" for different leaflets (e.g., "POPC//POPE"). '
+                            'To see all available lipids run packmol-memgen --available_lipids')
+        group.addParam('memRatio', params.StringParam, default='1',
+                       label='Lipid ratio:',
+                       help='Molar ratio matching the lipid string (e.g., "1:1"). '
+                            'Set to 1 if single lipid.')
+
         #
         # group = form.addGroup('ligand modifications options', condition='ligand == True')
         # group.addParam('proteinResidues', params.BooleanParam, default=False,
@@ -159,20 +176,13 @@ class AmberSystemPrep(EMProtocol):
                       help="Enter the integer net charge of the molecule. \n"
                            "If antechamber reports an 'odd number of electrons', your charge is likely "
                            "mismatched with your structure's protonation state.")
-        # group.addParam('DNAForceField', params.BooleanParam, default= False,
-        #                label='DNA Force Field')
-        # group.addParam('RNAForceField', params.BooleanParam, default= False,
-        #                label='RNA Force Field')
-        # group.addParam('RNAForceFieldType', params.EnumParam, condition='RNAForceField',
-        #                label='Type', choices=['OL3', 'LJbb', 'YIL', 'ROC', 'Shaw'])
-        # group.addParam('LipidForceField', params.BooleanParam, default= False,
-        #                label='Lipid Force Field')
+        group.addParam('lipidFF', params.EnumParam, condition='tMem',
+                       label='Type',choices=['lipid21','lipid17'], default=0)
         group.addParam('WaterForceField', params.EnumParam, default=1,
                        choices=['tip4pew', 'spce', 'spceb', 'opc', 'opc3', 'tip3p'],
                        allowsNull=True,
                        label='Water Force Field',
                        help='Force field applied to the water')
-
         group = form.addGroup('Disulfide bridges')
         group.addParam('DisulfideBridges', params.BooleanParam,
                        label='Are there any S-S bridges?', default=False,
@@ -182,15 +192,21 @@ class AmberSystemPrep(EMProtocol):
                        label='Number of the residues involved in the disulfide bridge \n'
                              'with format 1º Residue - 2º Residue / 1º Residue - 2º Residue')
 
-        group = form.addGroup('Solvate')
-        group.addParam('SolvateStep', params.EnumParam, default=0,
+        group = form.addGroup('Solvent box')
+        group.addParam('SolvateStep', params.EnumParam, default=0, condition='tMem==False',
                        choices=['Cubic', 'Octahedric'], defalult='Cubic',
                        label='Solvation box',
                        help='Both solvation boxes will be isometric')
-        line = group.addLine('Box size:')
-        line.addParam('Distance', params.FloatParam,
-                      default=20.0)
+        group.addParam('minDist', params.FloatParam, condition='tMem==False', label='Padding distance:',
+                      default=20.0, help='Minimum distance Å from the protein to the edge of the box')
+        group.addParam('memDistXY', params.FloatParam, default=15.0, condition='tMem',
+                       label='Min dist to XY boundary (Å):',
+                       help='Minimum distance between the protein and the box boundaries in X/Y axes. ')
+        group.addParam('memDistZ', params.FloatParam, default=17.5, condition='tMem',
+                       label='Water layer width Z (Å):',
+                       help='Thickness of the water layer above/below the membrane in Z axis.')
 
+        ## AÑADIR CATION ANION Y MOLARIDAD
     # --------------------------- STEPS functions ------------------------------
 
     def _insertAllSteps(self):
@@ -201,12 +217,12 @@ class AmberSystemPrep(EMProtocol):
         print(recFile, molFile)
 
         if molFile:
-            # self._insertFunctionStep('PrepStep')
             self._insertFunctionStep('AntechamberStep', molFile)
-            # self._insertFunctionStep('ParmStep')
             self._insertFunctionStep('leapStep')
         self._insertFunctionStep('PDBAmberStep')
-        self._insertFunctionStep('forceFieldStep')
+        if self.tMem.get():
+            self._insertFunctionStep('membraneStep')
+        self._insertFunctionStep('tleapStep')
         self._insertFunctionStep('createOutputStep')
 
     def PrepStep(self):
@@ -318,67 +334,117 @@ class AmberSystemPrep(EMProtocol):
 
         amber.Plugin.runAmbertools(self, 'pdb4amber', params, cwd=self.getTargetFileDir())
 
-    def forceFieldStep(self):
+    def tleapStep(self):
         inputStructure = self.findFile(self.getTargetFileDir(), '_amber.pdb')
         systemBasename = os.path.basename(inputStructure.split(".")[0])
+        hasLigand = (self.inputFrom.get() == LIGAND)
+        hasMembrane = self.tMem
         if self.inputFrom.get() == LIGAND:
-            targetBasename = os.path.basename(self.findFile(self.getLigandFileDir(),'.sdf').split(".")[0])
+            targetBasename = os.path.basename(self.findFile(self.getLigandFileDir(), '.sdf').split(".")[0])
         else:
             targetBasename = os.path.basename(self.getReceptorPDB().split(".")[0])
-        leapParams = ''
 
-        if self.ProteinForceField:
-            leapParams += 'source leaprc.protein.{} \n'.format(self.getEnumText('ProteinFF'))
+        cmdsTleap = []
+        # load force fields
+        cmdsTleap.append(f"source leaprc.protein.{self.getEnumText('ProteinFF')}")
+        cmdsTleap.append(f"source leaprc.water.{self.getEnumText('WaterForceField')}")
+        if hasMembrane:
+            cmdsTleap.append(f"source leaprc.{self.getEnumText('lipidFF')}")
+        if hasLigand:
+            cmdsTleap.append(f"source leaprc.{self.getEnumText('ligandFF')}")
 
-        if self.WaterForceField:
-            leapParams += 'source leaprc.water.{} \n'.format(self.getEnumText('WaterForceField'))
-
-        leapParams += 'APO = loadPdb {} \n'.format(inputStructure)
-
+        # load components
+        components = []
+        cmdsTleap.append(f"PROT = loadPdb {inputStructure}")
+        components.append('PROT')
         if self.DisulfideBridges:
-
             for pair in self.DisulfideBridgesNumber.get().split('/'):
                 first = pair.split('-')[0]
                 second = pair.split('-')[1]
-                leapParams += 'bond APO.{}.SG APO.{}.SG \n'.format(first, second)
+                cmdsTleap.append(f"bond PROT.{first}.SG PROT.{second}.SG")
 
-        if self.inputFrom.get() == LIGAND:
-            ligFF = self.getEnumText('ligandFF')
+        # ligand
+        if hasLigand:
+            cmdsTleap.append(f"loadoff {self.findFile(self.getLigandFileDir(), '.lib')}")
+            cmdsTleap.append(f"LIG = loadmol2 {self.findFile(self.getLigandFileDir(), '.mol2')}")
+            components.append('LIG')
+            cmdsTleap.append(f"loadamberparams {self.findFile(self.getLigandFileDir(), '.frcmod')}")
 
-            leapParams += 'source leaprc.{} \n'.format(ligFF)
-            leapParams += 'loadoff {}\n'.format(self.findFile(self.getLigandFileDir(),'.lib'))
-            leapParams += 'LIG = loadmol2 {}\n'.format(self.findFile(self.getLigandFileDir(),'.mol2'))
-            leapParams += 'loadamberparams {}\n'.format(self.findFile(self.getLigandFileDir(),'.frcmod'))
-            leapParams += 'HOLO = combine { APO LIG }\n'
+        # membrane
+        if hasMembrane:
+            memStructure = self.findFile(self.getTargetFileDir(), "_bilayer_aligned.pdb")
+            cmdsTleap.append(f"MEMB = loadPdb {memStructure}")
+            components.append('MEMB')
+
+        if len(components) == 1:
+            cmdsTleap.append('SYSTEM = PROT')
         else:
-            leapParams += 'HOLO = APO \n'
+            cmdsTleap.append(f"SYSTEM = combine {{ {' '.join(components)} }}")
 
-        if self.getEnumText('SolvateStep') == 'Cubic':
-            Boxtype = 'SolvateBox'
-        else:
-            Boxtype = 'SolvateOct'
+        # solvation non-membrane
+        if not hasMembrane:
+            boxtype = "SolvateBox" if self.getEnumText("SolvateStep") == "Cubic" else "SolvateOct"
 
-        if self.getEnumText('WaterForceField') == 'tip3p':
-            leapParams += 'charge HOLO \n {} HOLO TIP3PBOX {} iso \n'.format(Boxtype, self.Distance.get())
-        elif self.getEnumText('WaterForceField') == 'tip4pew':
-            leapParams += 'charge HOLO \n {} HOLO TIP4PEWBOX {} iso \n'.format(Boxtype, self.Distance.get())
-        elif self.getEnumText('WaterForceField') == 'spece':
-            leapParams += 'charge HOLO \n {} HOLO SPCEBOX {} iso \n'.format(Boxtype, self.Distance.get())
-        elif self.getEnumText('WaterForceField') == 'opc':
-            leapParams += 'charge HOLO \n {} HOLO OPCBOX {} iso \n'.format(Boxtype, self.Distance.get())
-        elif self.getEnumText('WaterForceField') == 'opc3':
-            leapParams += 'charge HOLO \n {} HOLO OPC3BOX {} iso \n'.format(Boxtype, self.Distance.get())
+            waterBoxes = {
+                "tip3p": "TIP3PBOX",
+                "tip4pew": "TIP4PEWBOX",
+                "spece": "SPCEBOX",
+                "opc": "OPCBOX",
+                "opc3": "OPC3BOX"
+            }
+            waterModel = self.getEnumText("WaterForceField")
+            wat = waterBoxes[waterModel]
 
-        leapParams += 'addIons HOLO Cl- 0 \n addIons HOLO Na+ 0 \n'
-        leapParams += 'savepdb HOLO {}.pdb\n'.format(targetBasename)
-        leapParams += 'saveAmberParm HOLO {}.prmtop {}.crd \n savepdb HOLO {}_system.pdb \n' \
-                      'quit'.format(targetBasename, targetBasename, targetBasename)
+            cmdsTleap.append("charge SYSTEM")
+            cmdsTleap.append(f"{boxtype} SYSTEM {wat} {self.minDist.get()} iso")
+            cmdsTleap.append("addIons SYSTEM Cl- 0")
+            cmdsTleap.append("addIons SYSTEM Na+ 0")
 
-        file = open(os.path.join(self.getTargetFileDir(),"leap_commands.txt"), "w")
-        file.write(leapParams)
-        file.close()
+        # solvation membrane
+        if hasMembrane:
+            x, y, z = self._memBox
+            cmdsTleap.append(f"set SYSTEM box {{{x:.3f} {y:.3f} {z:.3f}}}")
 
-        amber.Plugin.runAmbertools(self, 'tleap ', "-f leap_commands.txt", cwd=self.getTargetFileDir())
+        cmdsTleap.append(f"savepdb SYSTEM {targetBasename}.pdb")
+        cmdsTleap.append(f"saveAmberParm SYSTEM {targetBasename}.prmtop {targetBasename}.crd")
+        cmdsTleap.append(f"savepdb SYSTEM {targetBasename}_system.pdb")
+
+        cmdsTleap.append("quit")
+
+        # Write leap script + run
+        leapFile = os.path.join(self.getTargetFileDir(), "leap_commands.txt")
+
+        with open(leapFile, "w") as f:
+            f.write("\n".join(cmdsTleap))
+
+        amber.Plugin.runAmbertools(self, "tleap", "-f leap_commands.txt", cwd=self.getTargetFileDir())
+
+    def membraneStep(self):
+        inputStructure = self.findFile(self.getTargetFileDir(), '_amber.pdb')
+        systemBasename = self.getSystemName()
+        memOutput = os.path.join(f'{systemBasename}_bilayer.pdb')
+
+        params = f'--lipids {self.memLipids.get()} --ratio {self.memRatio.get()} --dist {self.memDistXY.get()}' \
+                 f' --dist_wat {self.memDistZ.get()} --pdb {inputStructure} --notprotonate --nottrim -o {memOutput}' \
+                 f' --saltcon 0.15'
+
+        amber.Plugin.runAmbertools(self, 'packmol-memgen ', params, cwd=self.getTargetFileDir())
+
+        logFile = os.path.join(self.getTargetFileDir(), "packmol-memgen.log")
+        x, y, z = self.extractBoxFromMemgenLog(logFile)
+        print(f"Membrane box extracted: {x:.3f} {y:.3f} {z:.3f}")
+        self._memBox = (x, y, z)
+
+        # align the membrane to the input pdb to keep the coordinates
+        memOutputAligned = (os.path.join(self.getTargetFileDir(), f'{systemBasename}_bilayer_aligned.pdb'))
+        scriptParams = (
+            f"-i {inputStructure} "
+            f"-m {memOutput} "
+            f"-o {memOutputAligned}"
+        )
+        amberPlugin.runScript(self, 'alignMembrane.py', args=scriptParams, env=AMBER_DIC,
+                              cwd=self.getTargetFileDir())
+        # amber.Plugin.runAmbertools(self, '{} -cq -d'.format(self.getPymolBin()), f'"{pymolCmd}"', cwd=self.getTargetFileDir())
 
     def createOutputStep(self):
         systemBasename = self.getSystemName()
@@ -514,3 +580,31 @@ class AmberSystemPrep(EMProtocol):
 
     def getSystemName(self):
       return getBaseName(self.getReceptorFilename())
+
+    def extractBoxFromMemgenLog(self, logFile):
+        """
+        Reads packmol-memgen.log and extracts boxsize x_len, y_len, z_len.
+        Returns tuple (x, y, z).
+        """
+        if not os.path.exists(logFile):
+            raise FileNotFoundError(f"packmol-memgen log not found: {logFile}")
+
+        with open(logFile, "r") as f:
+            text = f.read()
+
+        # Regex patterns
+        x_match = re.search(r"x_len\s*=\s*([0-9.+-Ee]+)", text)
+        y_match = re.search(r"y_len\s*=\s*([0-9.+-Ee]+)", text)
+        z_match = re.search(r"z_len\s*=\s*([0-9.+-Ee]+)", text)
+
+        if not (x_match and y_match and z_match):
+            raise ValueError("Could not extract box dimensions from packmol-memgen.log")
+
+        x_len = float(x_match.group(1))
+        y_len = float(y_match.group(1))
+        z_len = float(z_match.group(1))
+
+        return x_len, y_len, z_len
+
+    def getPymolBin(self):
+        return pwchemPlugin.getEnvPath(OPENBABEL_DIC, 'bin/pymol')

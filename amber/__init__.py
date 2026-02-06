@@ -24,6 +24,7 @@
 # *
 # **************************************************************************
 
+import os
 import pwem
 
 from pyworkflow import join
@@ -37,8 +38,6 @@ from scipion.install.funcs import InstallHelper
 
 _logo = "icon.png"
 _references = ['Salomon-Ferrer2013']
-
-AMBER_DIC = {'name': 'amber', 'version': AMBER_DEFAULT_VERSION, 'home': 'AMBER_HOME', 'pmemd_home': 'PMEMD_HOME'}
 
 class Plugin(pwchem.Plugin):
     @classmethod
@@ -83,6 +82,12 @@ class Plugin(pwchem.Plugin):
             ).addPackage(env, dependencies=['conda'], default=True)
 
     # ---------------------------------- Utils functions  -----------------------
+    @classmethod
+    def getPluginHome(cls, path=""):
+        import amber
+        fnDir = os.path.split(amber.__file__)[0]
+        return os.path.join(fnDir, path)
+
     @classmethod
     def runAmbertools(cls, protocol, program, args, cwd=None):
         """ Run Ambertools command from a given protocol. """

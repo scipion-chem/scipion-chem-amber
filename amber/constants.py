@@ -34,3 +34,5 @@ V2025 = '2025.1'
 AMBER_DEFAULT_VERSION = V2025
 
 VMD_HOME = 'VMD_HOME'
+
+AMBER_DIC = {'name': 'amber', 'version': AMBER_DEFAULT_VERSION, 'home': 'AMBER_HOME', 'pmemd_home': 'PMEMD_HOME'}
