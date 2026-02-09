@@ -5,6 +5,7 @@ import os.path
 import argparse
 import numpy as np
 
+
 # * Authors: Joaquin Algorta (joaquin.algorta@cnb.csic.es)
 # Adapted script from https://github.com/callumjd/AMBER-Membrane_protein_tutorial
 ################################################################################
@@ -43,16 +44,52 @@ def atom_mass(str):
             return weight[str[1]]
 
 
+def is_non_protein_atom(line):
+    """Check if atom is membrane, water, or ion (not protein)"""
+    # Try to get segment identifier from the end of the line
+    # Standard PDB format: columns 72-76, but can also check split()[-1]
+    parts = line.split()
+    last_field = parts[-1] if len(parts) > 0 else ""
+
+    # Also try standard PDB column position
+    segment_id = line[72:76].strip() if len(line) > 72 else ""
+
+    # Get residue name (columns 17-20)
+    residue_name = line[17:20].strip()
+
+    # Ion residue names
+    ion_names = ['Na+', 'K+', 'Cl-', 'SOD', 'POT', 'CLA', 'CA', 'MG', 'ZN', 'Mg2+', 'Ca2+']
+
+    # Water residue names
+    water_names = ['TIP3', 'WAT', 'HOH', 'TIP', 'SPC']
+
+    # Check if it's membrane (by segment ID or last field)
+    if segment_id == 'MEMB' or last_field == 'MEMB':
+        return True, 'membrane'
+
+    # Check if it's water
+    if residue_name in water_names or last_field in water_names:
+        return True, 'water'
+
+    # Check if it's ion
+    if residue_name in ion_names:
+        return True, 'ion'
+
+    return False, None
+
+
 def get_protein_coords(file_in):
     """Extract protein atom coordinates (CA atoms for alignment)"""
     coords = []
-    disallow = ['MEMB', 'TIP3', 'SOD', 'POT', 'CLA']
 
     with open(file_in, 'r') as f:
         for line in f:
             if line.split()[0] == 'ATOM' or line.split()[0] == 'HETATM':
-                if line.split()[-1] not in disallow:
-                    # Use CA atoms for alignment (or all atoms if you prefer)
+                is_non_protein, atom_type = is_non_protein_atom(line)
+
+                # Only use protein atoms for alignment
+                if not is_non_protein:
+                    # Use CA atoms for alignment
                     atom_name = line[12:16].strip()
                     if atom_name == 'CA':  # Change to 'if True:' to use all protein atoms
                         x = float(line[30:38])
@@ -110,13 +147,15 @@ def calculate_rmsd(P, Q):
 def get_wat_size(file_in):
     """Get water box dimensions"""
     wat_xyz = []
+
     with open(file_in, 'r') as f_in:
         for line in f_in:
             if line.split()[0] == 'ATOM' or line.split()[0] == 'HETATM':
-                if line.split()[-1] == 'TIP3':
-                    x = float(line.split()[-6])
-                    y = float(line.split()[-5])
-                    z = float(line.split()[-4])
+                is_non_protein, atom_type = is_non_protein_atom(line)
+                if is_non_protein and atom_type == 'water':
+                    x = float(line[30:38])
+                    y = float(line[38:46])
+                    z = float(line[46:54])
                     wat_xyz.append((x, y, z))
 
     if len(wat_xyz) > 0:
@@ -198,14 +237,20 @@ print()
 
 print(f"Writing aligned system to: {output_file}")
 
-disallow = ['MEMB', 'TIP3', 'SOD', 'POT', 'CLA']
+ion_count = 0
+membrane_count = 0
+water_count = 0
+
+prev_was_non_protein = False
 
 with open(output_file, 'w') as f_out:
     with open(membrane_file, 'r') as f_in:
         for line in f_in:
             if line.split()[0] == 'ATOM' or line.split()[0] == 'HETATM':
+                is_non_protein, atom_type = is_non_protein_atom(line)
+
                 # Only process membrane, water, and ion atoms (not protein)
-                if line.split()[-1] in disallow:
+                if is_non_protein:
                     # Extract coordinates
                     x = float(line[30:38])
                     y = float(line[38:46])
@@ -219,9 +264,25 @@ with open(output_file, 'w') as f_out:
                     new_line = (f"{line[0:30]}{new_coord[0]:8.3f}{new_coord[1]:8.3f}"
                                 f"{new_coord[2]:8.3f}{line[54:]}")
                     f_out.write(new_line)
+
+                    # Count what we're transforming
+                    if atom_type == 'ion':
+                        ion_count += 1
+                    elif atom_type == 'water':
+                        water_count += 1
+                    elif atom_type == 'membrane':
+                        membrane_count += 1
+
+                    prev_was_non_protein = True
+                else:
+                    prev_was_non_protein = False
+
                 # Skip protein atoms - don't write them
             elif line.split()[0] == 'TER':
-                f_out.write(line)
+                # Only write TER if previous atom was non-protein
+                if prev_was_non_protein:
+                    f_out.write(line)
+                    prev_was_non_protein = False
             elif line.split()[0] == 'END':
                 f_out.write(line)
 
@@ -229,4 +290,8 @@ box_dimensions = get_wat_size(membrane_file)
 if box_dimensions.x > 0:
     print(f'\nOriginal box X, Y, Z: {box_dimensions.x:.3f} {box_dimensions.y:.3f} {box_dimensions.z:.3f}')
 
+print(f"\nTransformed atoms:")
+print(f"  Ions: {ion_count}")
+print(f"  Water: {water_count}")
+print(f"  Membrane: {membrane_count}")
 print("\nAlignment complete!")

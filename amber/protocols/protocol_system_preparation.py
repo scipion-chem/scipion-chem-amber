@@ -33,8 +33,10 @@ from os.path import relpath, abspath
 import os
 import re
 import numpy as np
+import math
 
 from pwem.protocols import EMProtocol, ProtImportFiles
+from pyparsing import conditionAsParseAction
 from pyworkflow.protocol import params
 from pyworkflow.utils import Message
 
@@ -122,6 +124,12 @@ class AmberSystemPrep(EMProtocol):
                        label='Lipid ratio:',
                        help='Molar ratio matching the lipid string (e.g., "1:1"). '
                             'Set to 1 if single lipid.')
+        group.addParam('memPosition', params.EnumParam, choices=['Preoriented', 'MEMEMBED', 'PPM'],
+                       label='Membrane orientation method', condition='tMem', default='1',
+                       help='Select the method to orient the protein within the lipid bilayer: '
+                        '“Preoriented” uses existing PDB coordinates (i.e. from OPM) '
+                        '“MEMEMBED” performs a geometric search for the best embedding '
+                        '“PPM” uses an electrochemical model to calculate the optimal depth and tilt.')
 
         #
         # group = form.addGroup('ligand modifications options', condition='ligand == True')
@@ -147,23 +155,19 @@ class AmberSystemPrep(EMProtocol):
                        choices=self._Status,
                        label='Choose status information: ')
 
-
         form.addSection('MD prep')
         group = form.addGroup('Force field', help='Force field applied to the system. Force fields are sets of '
                                                   'potential functions and '
                                                   'parametrized interactions that can be used to study physical '
                                                   'systems. You should select as '
                                                   'many force fields as molecules in your system (i.e protein + ligand')
-
-        group.addParam('ProteinForceField', params.BooleanParam, allowsNull=True, default=True,
-                       label='Protein Force Field')
-        group.addParam('ProteinFF', params.EnumParam,
-                       label='Type',
+        group.addParam('proteinFF', params.EnumParam,
+                       label='Protein Force Field', help='Protein force filed to use',
                        choices=['ff14SB', 'ff19SB', 'ff14SBonlysc', 'ff15ipq', 'fb15', 'ff03.r1', 'ff03ua'],
                        default=0)
-        group.addParam('protNetCharge', params.IntParam, default=0, expertLevel=params.LEVEL_ADVANCED,
-                      label='Target net charge: ',
-                      help="Enter the integer net charge of the molecule. \n")
+        # group.addParam('protNetCharge', params.IntParam, default=0, expertLevel=params.LEVEL_ADVANCED,
+        #               label='Target net charge: ',
+        #               help="Enter the integer net charge of the molecule. \n")
         group.addParam('ligandCharge', params.EnumParam, default=2, choices=['AM1-BCC', 'Mulliken', 'Gasteiger'],
                        condition=LIG_INPUT, label="Small molecules charge method: ",
                        help='Small molecules charge method to use')
@@ -171,11 +175,11 @@ class AmberSystemPrep(EMProtocol):
                       condition=LIG_INPUT, label="Small molecules force field: ",
                       help='Small molecules force field to use')
 
-        group.addParam('ligNetCharge', params.IntParam, default=0, expertLevel=params.LEVEL_ADVANCED,
-                      label='Ligand net charge: ', condition=LIG_INPUT,
-                      help="Enter the integer net charge of the molecule. \n"
-                           "If antechamber reports an 'odd number of electrons', your charge is likely "
-                           "mismatched with your structure's protonation state.")
+        # group.addParam('ligNetCharge', params.IntParam, default=0, expertLevel=params.LEVEL_ADVANCED,
+        #               label='Ligand net charge: ', condition=LIG_INPUT,
+        #               help="Enter the integer net charge of the molecule. \n"
+        #                    "If antechamber reports an 'odd number of electrons', your charge is likely "
+        #                    "mismatched with your structure's protonation state.")
         group.addParam('lipidFF', params.EnumParam, condition='tMem',
                        label='Type',choices=['lipid21','lipid17'], default=0)
         group.addParam('WaterForceField', params.EnumParam, default=1,
@@ -206,6 +210,14 @@ class AmberSystemPrep(EMProtocol):
                        label='Water layer width Z (Å):',
                        help='Thickness of the water layer above/below the membrane in Z axis.')
 
+        line = group.addLine('Salt configuration: ', help='Ions to add to neutralize and to achive a desire salt concentration')
+        line.addParam('cationType', params.EnumParam, label='Cation:',
+                      default=1, help='Cation to add', choices=['Na+', 'K+'])
+        line.addParam('anionType', params.EnumParam, label='Anion:',
+                      default=0, help='Anion to add', choices=['Cl-'], defalut=0)
+        line.addParam('ionConc', params.FloatParam, label='Concentration (M):',
+                      default=0.15, help='Salt concentration of the system')
+
         ## AÑADIR CATION ANION Y MOLARIDAD
     # --------------------------- STEPS functions ------------------------------
 
@@ -213,42 +225,14 @@ class AmberSystemPrep(EMProtocol):
         # Insert processing steps
         recFile = self.getReceptorPDB()
         molFile = self.getSpecifiedMolFile() if self.inputFrom.get() == LIGAND else None
-
-        print(recFile, molFile)
-
         if molFile:
             self._insertFunctionStep('AntechamberStep', molFile)
-            self._insertFunctionStep('leapStep')
+            self._insertFunctionStep('ligLeapStep')
         self._insertFunctionStep('PDBAmberStep')
         if self.tMem.get():
             self._insertFunctionStep('membraneStep')
         self._insertFunctionStep('tleapStep')
         self._insertFunctionStep('createOutputStep')
-
-    def PrepStep(self):
-        for mol in self.inputLigands.get():
-            if mol == self.inputLigandSelect:
-                myMol = mol
-                break
-        myMolFile = os.path.abspath(myMol.getFileName())
-
-        inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
-        systemBasename = os.path.basename(inputStructure.split(".")[0])
-
-        params = '{} > {}.LIG.pdb '.format(myMolFile, systemBasename)
-
-        if self.proteinResidues:
-            params += '-p '
-        if self.AmberCompatibleResidues:
-            params += '-a '
-        if self.phSimulation:
-            params += '--constantph '
-        if self.reduce:
-            params += '--reduce '
-        if self.tleap:
-            params += '--add-missing-atoms '
-
-        amber.Plugin.runAmbertools(self, 'pdb4amber', params, cwd=self._getPath())
 
     def AntechamberStep(self, molFile):
         # inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
@@ -290,7 +274,7 @@ class AmberSystemPrep(EMProtocol):
         amber.Plugin.runAmbertools(self, 'parmchk2', params, cwd=self.getLigandFileDir())
 
 
-    def leapStep(self):
+    def ligLeapStep(self):
         # inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
         # systemBasename = os.path.basename(inputStructure.split(".")[0])
         molFile = self.findFile(self.getLigandFileDir(),'.mol2')
@@ -339,14 +323,18 @@ class AmberSystemPrep(EMProtocol):
         systemBasename = os.path.basename(inputStructure.split(".")[0])
         hasLigand = (self.inputFrom.get() == LIGAND)
         hasMembrane = self.tMem
+
         if self.inputFrom.get() == LIGAND:
             targetBasename = os.path.basename(self.findFile(self.getLigandFileDir(), '.sdf').split(".")[0])
         else:
             targetBasename = os.path.basename(self.getReceptorPDB().split(".")[0])
+        if not hasMembrane:
+            nCation, nAnion = self.calcIonConc(inputStructure, self.getEnumText('proteinFF'), self.getEnumText('WaterForceField'), self.ionConc.get())
+            print(f'{nCation} cations and {nAnion} anion will be added\n')
 
         cmdsTleap = []
         # load force fields
-        cmdsTleap.append(f"source leaprc.protein.{self.getEnumText('ProteinFF')}")
+        cmdsTleap.append(f"source leaprc.protein.{self.getEnumText('proteinFF')}")
         cmdsTleap.append(f"source leaprc.water.{self.getEnumText('WaterForceField')}")
         if hasMembrane:
             cmdsTleap.append(f"source leaprc.{self.getEnumText('lipidFF')}")
@@ -397,8 +385,7 @@ class AmberSystemPrep(EMProtocol):
 
             cmdsTleap.append("charge SYSTEM")
             cmdsTleap.append(f"{boxtype} SYSTEM {wat} {self.minDist.get()} iso")
-            cmdsTleap.append("addIons SYSTEM Cl- 0")
-            cmdsTleap.append("addIons SYSTEM Na+ 0")
+            cmdsTleap.append(f"addIonsRand SYSTEM {self.getEnumText('cationType')} {nCation} {self.getEnumText('anionType')} {nAnion}")
 
         # solvation membrane
         if hasMembrane:
@@ -425,8 +412,13 @@ class AmberSystemPrep(EMProtocol):
         memOutput = os.path.join(f'{systemBasename}_bilayer.pdb')
 
         params = f'--lipids {self.memLipids.get()} --ratio {self.memRatio.get()} --dist {self.memDistXY.get()}' \
-                 f' --dist_wat {self.memDistZ.get()} --pdb {inputStructure} --notprotonate --nottrim -o {memOutput}' \
-                 f' --saltcon 0.15'
+                 f' --dist_wat {self.memDistZ.get()} --pdb {inputStructure} --notprotonate --nottrim -o {memOutput} --salt' \
+                 f' --salt_c {self.getEnumText("cationType")} --salt_a {self.getEnumText("anionType")} --saltcon {self.ionConc.get()}'
+
+        if self.getEnumText('memPosition') == 'Preoriented':
+            params += ' --preoriented'
+        elif self.getEnumText('memPosition') == 'PPM':
+            params += ' --ppm'
 
         amber.Plugin.runAmbertools(self, 'packmol-memgen ', params, cwd=self.getTargetFileDir())
 
@@ -463,7 +455,7 @@ class AmberSystemPrep(EMProtocol):
         shutil.copy(srcSystemPdb, destSystemPdb)
 
         createdSystem = amberobj.AmberSystem(filename=destSystemPdb, crdFile=destCrd, topoFile=destTop,
-                                           ff=self.getEnumText('ProteinFF'),
+                                           ff=self.getEnumText('proteinFF'),
                                            wff=self.getEnumText('WaterForceField'))
 
         if self.inputFrom.get() == LIGAND:
@@ -544,6 +536,81 @@ class AmberSystemPrep(EMProtocol):
         runOpenBabel(protocol=self, args=args, cwd=self._getTmpPath())
 
         return oFile
+
+    def calcIonConc(self, proteinFile, proteinFF, waterFF, molar):
+        '''calculate the number of ions to get a desired concentration based on
+        the SPLIT method https://doi.org/10.1021/acs.jctc.9b00953'''
+        ligandFile = None
+        if self.inputFrom.get() == LIGAND:
+            ligandFile = self.findFile(self.getLigandFileDir(), '.mol2')
+        nWaters, totalQ = self.getNumberWaters(proteinFile, proteinFF, waterFF, ligandFile, self.getEnumText('ligandFF'))
+        # 1. expected number of ions
+        nIons = (nWaters * molar) / 56 # The constant 56 is the 'intuitive shortcut' for water molarity
+
+        # 2. Calculate number of ions (N+ and N-)
+        # We use math.ceil to handle the "round up in case of odd Q" requirement
+        nCation = int(math.ceil(nIons - (totalQ / 2)))
+        nAnion = int(math.ceil(nIons + (totalQ / 2)))
+
+        # Final check: Ensure we don't return negative ions
+        # (can happen with very high charge and very low No)
+        nCation = max(0, nCation)
+        nAnion = max(0, nAnion)
+
+        return nCation, nAnion
+
+    def getNumberWaters(self, proteinFile, proteinFF, waterFF, ligFile=None, ligFF=None):
+        '''runs short tleap to calculate nWaters of the box and total charge of the protein or protein+lig'''
+        leap_input = os.path.join(self.getTargetFileDir(),'get_info.in')
+        leap_log = os.path.join(self.getTargetFileDir(), "get_info.log")
+
+        commands = []
+        commands.append(f"source leaprc.water.{waterFF}")
+        commands.append(f"source leaprc.protein.{proteinFF}")
+
+        if ligFF:
+            commands.append(f"source leaprc.{ligFF}")
+
+        # Load Solute
+        commands.append(f"PROT = loadPdb {proteinFile}")
+
+        if ligFile:
+            commands.append(f"LIG = loadmol2 {ligFile}")
+            commands.append("COMPLEX = combine {PROT LIG}")
+            unit = "COMPLEX"
+        else:
+            unit = "PROT"
+
+        commands.append(f"solvateBox {unit} TIP3PBOX {self.minDist.get()} iso")
+
+        commands.append(f"charge {unit}")
+        commands.append("quit")
+
+        # Write and run tleap
+        with open(leap_input, "w") as f:
+            f.write("\n".join(commands))
+
+        amber.Plugin.runAmbertools(self, 'tleap', f'-f get_info.in > {leap_log}', cwd=self.getTargetFileDir())
+
+        # Parse the log for Nw and Q
+        nWaters = 0
+        totalQ = 0
+
+        if os.path.exists(leap_log):
+            with open(leap_log, "r") as f:
+                log_content = f.read()
+
+                # Find water count: "Added 12345 residues."
+                nw_match = re.search(r"Added\s+(\d+)\s+residues\.", log_content)
+                if nw_match:
+                    nWaters = int(nw_match.group(1))
+
+                # Find charge: "Total unperturbated charge:  -2.000"
+                q_match = re.search(r"Total\s+unperturbed\s+charge:\s+(-?\d+\.?\d*)", log_content)
+                if q_match:
+                    totalQ = float(q_match.group(1))
+
+        return nWaters, totalQ
 
     def _summary(self):
         """ Summarize what the protocol has done"""
