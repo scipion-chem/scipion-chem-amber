@@ -60,9 +60,11 @@ class AmberMDSimulation(EMProtocol):
     _shakeAlgorithm = ['Shake not performed', 'Bonds involving hydrogens are constrains', 'all bonds are constrained']
 
     _omitParamNames = ['runName', 'runMode', 'insertStep', 'summarySteps', 'deleteStep', 'watchStep',
-                       'workFlowSteps', 'hostName', 'numberOfThreads', 'numberOfMpi']
+                       'workFlowSteps', 'hostName', 'numberOfThreads', 'numberOfMpi', 'simRestrAtoms', 'heatRestrAtoms', 'minRestrAtoms']
 
     _key_map = {'Minimization': 'min', 'Heating': 'heat', 'Simulation': 'sim'}
+
+    _restrained_groups=list(RESTRAINS_DIC.keys())
 
     # -------------------------- DEFINE constants ----------------------------
     def __init__(self, **kwargs):
@@ -101,6 +103,17 @@ class AmberMDSimulation(EMProtocol):
                       label='Steepest Descent cycles:', condition='energyMin')
         line.addParam('minIntCutoff', params.FloatParam, default=8.0,
                       label='Interaction cutoff', condition='energyMin')
+
+        group.addParam('minRestraint', params.BooleanParam, default=False,
+                       label='Add restrains',
+                       help='Restraining specified atoms in Cartesian space using a harmonic potential')
+        lineMin = group.addLine('Restrains in minimization: ', condition='minRestraint',
+                             help="Specify the components of the system to be restraint and the associated force constant.")
+        lineMin.addParam('minRestrAtoms', params.EnumParam, choices=self._restrained_groups, default=0,
+                      label='Atoms to restrain')
+        lineMin.addParam('minRestrForce', params.FloatParam, default=50.0,
+                      label='Force (kcal·mol-1·Å-2)')
+
         group.addParam('minCustomIn', params.TextParam, width=60, readOnly=True, default=None,
                        label='Input sander/pmemd', expertLevel=params.LEVEL_ADVANCED, condition='energyMin',
                        help='Upload a custom configuration file for the Minimization step.'
@@ -125,6 +138,16 @@ class AmberMDSimulation(EMProtocol):
                             'Providing a file here will override all other Heating parameters defined in the interface. For detailed syntax and options, '
                             'refer to the Amber Manual https://ambermd.org/doc12/Amber25.pdf.')
 
+        group.addParam('heatRestraint', params.BooleanParam, default=False,
+                       label='Add restrains',
+                       help='Restraining specified atoms in Cartesian space using a harmonic potential')
+        lineHeat = group.addLine('Restrains in heaiting: ', condition='heatRestraint',
+                             help="Specify the components of the system to be restraint and the associated force constant.")
+        lineHeat.addParam('heatRestrAtoms', params.EnumParam, default=3, choices=self._restrained_groups,
+                      label='Atoms to restrain')
+        lineHeat.addParam('heatRestrForce', params.FloatParam, default=50.0,
+                      label='Force (kcal·mol-1·Å-2)')
+
         group = form.addGroup('Simulation')
         group.addParam('simMDSteps', params.IntParam, default=10000,
                        label='Number of MD steps:',
@@ -138,8 +161,18 @@ class AmberMDSimulation(EMProtocol):
                        help='Upload a custom configuration file for the MD simulation.'
                             'Providing a file here will override all other simulation parameters defined in the interface. For detailed syntax and options, '
                             'refer to the Amber Manual https://ambermd.org/doc12/Amber25.pdf.')
-        group = form.addGroup('Ensemble')
 
+        group.addParam('simRestraint', params.BooleanParam, default=False,
+                       label='Add restrains',
+                       help='Restraining specified atoms in Cartesian space using a harmonic potential')
+        lineSim = group.addLine('Restrains in simulation: ', condition='simRestraint',
+                             help="Specify the components of the system to be restraint and the associated force constant.")
+        lineSim.addParam('simRestrAtoms', params.EnumParam, default=3, choices=self._restrained_groups,
+                      label='Atoms to restrain')
+        lineSim.addParam('simRestrForce', params.FloatParam, default=50.0,
+                      label='Force (kcal·mol-1·Å-2)')
+
+        group = form.addGroup('Ensemble')
         group.addParam('ensemType', params.EnumParam,
                        label='Simulation type: ',
                        choices=self._ensemTypes, default=0,
@@ -163,7 +196,7 @@ class AmberMDSimulation(EMProtocol):
                       label='Pressure (bar): ')
         line.addParam('barostat', params.EnumParam, default=1, condition='ensemType==1',
                       label='Barostat type: ', choices=self._barostats)
-        line.addParam('pressureScaling', params.EnumParam, default=2, condition='ensemType==1',
+        line.addParam('pressureScaling', params.EnumParam, default=1, condition='ensemType==1',
                       label='Pressure scaling: ', choices=self._coupleStyle)
         # line = group.addLine('SHAKE algorithm : ', help='In SHAKE algorithm, the system of non-linear constraint '
         #                                                 'equations is solved using the Gauss–Seidel method which '
@@ -359,6 +392,7 @@ class AmberMDSimulation(EMProtocol):
         for pName in self.getStageParamsDic(type='Enum').keys():
             if hasattr(self, pName):
                 msjDic[pName] = self.getEnumText(pName)
+                print(msjDic[pName])
             else:
                 print('Something is wrong with parameter ', pName)
         return msjDic
@@ -371,73 +405,73 @@ class AmberMDSimulation(EMProtocol):
                 msjDic[pName] = paramDic[pName].default
         return msjDic
 
-    def generateMDPFile(self, msjDic, mdpStage):
-        '''Generate .in file'''
-        stageDir = self._getExtraPath('stage_{}'.format(mdpStage))
-        os.mkdir(stageDir)
-        mdpFile = os.path.join(stageDir, 'stage_{}.in'.format(mdpStage))
-
-        params = '\n&cntrl \n' \
-                 '      dt={},' \
-                 ' nstlim={}, ntwr=50, ntwx=50, ntwe=50, '.format(msjDic['timeStep'],
-                                                                  int(msjDic['simTime'] / msjDic['timeStep']))
-
-        if msjDic['EnergyMin']:
-            params += ' imin=1,'
-        else:
-            params += ' imin=0,'
-
-        if msjDic['ensemType'] == 'NVT':
-            params += ' ntb=1,'
-        elif msjDic['ensemType'] == 'NPT':
-            params += ' ntb=2,'
-
-        if msjDic['thermostat'] == 'no':
-            params += ' ntt=0,'
-        if msjDic['thermostat'] == 'Andersen':
-            params += ' ntt=2,'
-        if msjDic['thermostat'] == 'Langevin':
-            params += ' ntt=3, gamma ln=2.0'
-        if msjDic['thermostat'] == 'Nose-Hoove':
-            params += ' ntt=9,'
-        if msjDic['thermostat'] == 'Nose-Hoover RESPA':
-            params += ' ntt=10,'
-        if msjDic['thermostat'] == 'Berendsen':
-            params += ' ntt=11,'
-
-        params += ' temp0={}, pres0={},'.format(msjDic['temperature'], msjDic['pressure'])
-
-        if msjDic['barostat'] == 'Berendsen':
-            params += ' barostat=1,'
-        elif msjDic['barostat'] == 'Monte Carlo':
-            params += ' barostat=2,'
-        else:
-            params += ''
-
-        if msjDic['ensemType'] == 'NPT':
-
-            if msjDic['pressureDynamics'] == 'isotropic':
-                params += ' ntp=1,'
-            if msjDic['pressureDynamics'] == 'anisotropic':
-                params += ' ntp=2,'
-            if msjDic['pressureDynamics'] == 'semiisotropic':
-                params += ' ntp=3,'
-        else:
-            params += ' ntp=0,'
-
-        if msjDic['Shake'] == 'Shake not performed':
-            params += ' ntc=1,'
-        if msjDic['Shake'] == 'Bonds involving hydrogens are constrains':
-            params += ' ntc=2,'
-        if msjDic['Shake'] == 'all bonds are constrained':
-            params += ' ntc=3,'
-
-        params += '\n&end \nEND'
-        print(msjDic)
-        with open(mdpFile, 'w') as f:
-            f.write(params)
-
-        return mdpFile
+    # def generateMDPFile(self, msjDic, mdpStage):
+    #     '''Generate .in file'''
+    #     stageDir = self._getExtraPath('stage_{}'.format(mdpStage))
+    #     os.mkdir(stageDir)
+    #     mdpFile = os.path.join(stageDir, 'stage_{}.in'.format(mdpStage))
+    #
+    #     params = '\n&cntrl \n' \
+    #              '      dt={},' \
+    #              ' nstlim={}, ntwr=50, ntwx=50, ntwe=50, '.format(msjDic['timeStep'],
+    #                                                               int(msjDic['simTime'] / msjDic['timeStep']))
+    #
+    #     if msjDic['EnergyMin']:
+    #         params += ' imin=1,'
+    #     else:
+    #         params += ' imin=0,'
+    #
+    #     if msjDic['ensemType'] == 'NVT':
+    #         params += ' ntb=1,'
+    #     elif msjDic['ensemType'] == 'NPT':
+    #         params += ' ntb=2,'
+    #
+    #     if msjDic['thermostat'] == 'no':
+    #         params += ' ntt=0,'
+    #     if msjDic['thermostat'] == 'Andersen':
+    #         params += ' ntt=2,'
+    #     if msjDic['thermostat'] == 'Langevin':
+    #         params += ' ntt=3, gamma ln=2.0'
+    #     if msjDic['thermostat'] == 'Nose-Hoove':
+    #         params += ' ntt=9,'
+    #     if msjDic['thermostat'] == 'Nose-Hoover RESPA':
+    #         params += ' ntt=10,'
+    #     if msjDic['thermostat'] == 'Berendsen':
+    #         params += ' ntt=11,'
+    #
+    #     params += ' temp0={}, pres0={},'.format(msjDic['temperature'], msjDic['pressure'])
+    #
+    #     if msjDic['barostat'] == 'Berendsen':
+    #         params += ' barostat=1,'
+    #     elif msjDic['barostat'] == 'Monte Carlo':
+    #         params += ' barostat=2,'
+    #     else:
+    #         params += ''
+    #
+    #     if msjDic['ensemType'] == 'NPT':
+    #
+    #         if msjDic['pressureDynamics'] == 'isotropic':
+    #             params += ' ntp=1,'
+    #         if msjDic['pressureDynamics'] == 'anisotropic':
+    #             params += ' ntp=2,'
+    #         if msjDic['pressureDynamics'] == 'semiisotropic':
+    #             params += ' ntp=3,'
+    #     else:
+    #         params += ' ntp=0,'
+    #
+    #     if msjDic['Shake'] == 'Shake not performed':
+    #         params += ' ntc=1,'
+    #     if msjDic['Shake'] == 'Bonds involving hydrogens are constrains':
+    #         params += ' ntc=2,'
+    #     if msjDic['Shake'] == 'all bonds are constrained':
+    #         params += ' ntc=3,'
+    #
+    #     params += '\n&end \nEND'
+    #     print(msjDic)
+    #     with open(mdpFile, 'w') as f:
+    #         f.write(params)
+    #
+    #     return mdpFile
 
     def customMDPFile(self, msjDic, type):
         stageDir = self._getExtraPath(type)
@@ -463,8 +497,11 @@ class AmberMDSimulation(EMProtocol):
         params = ''
         if type == 'Minimization':
             params = 'MINIMIZATION\n&cntrl \n' \
-                     'imin=1, ntx=1, irest=0, maxcyc={}, ncyc={},ntpr=100,' \
+                     'imin=1, ntx=1, irest=0, maxcyc={}, ncyc={}, ntpr=100,' \
                      ' ntwx=0, cut={}'.format(msjDic['minMaxCycles'], msjDic['minSdCycles'], msjDic['minIntCutoff'])
+            if msjDic['minRestraint']:
+                params += ", ntr=1, restraint_wt={}, restraintmask='{}' /".format(msjDic['minRestrForce'], RESTRAINS_DIC[self.getEnumText('minRestrAtoms')])
+
 
         if type == 'Heating':
             params = 'HEATING\n&cntrl \n' \
@@ -477,6 +514,9 @@ class AmberMDSimulation(EMProtocol):
                                            msjDic['heatTraj'],
                                            msjDic['heatTraj'])
             params += self.addThermostatParams(msjDic)
+            if msjDic['heatRestraint']:
+                params += ", ntr=1, restraint_wt={}, restraintmask='{}' /".format(msjDic['heatRestrForce'], RESTRAINS_DIC[self.getEnumText('minRestrAtoms')])
+
             params += '\n&wt type=\'TEMP0\', istep1=0, istep2={}, value1={}, value2={} /\n'.format(
                 msjDic['heatMDSteps'],
                 msjDic['heatInTemp'],
@@ -494,6 +534,9 @@ class AmberMDSimulation(EMProtocol):
             params += self.addThermostatParams(msjDic)
             if self.getEnumText('ensemType') == 'NPT':
                 params += self.addBarostatParams(msjDic)
+            if msjDic['heatRestraint']:
+                params += ", ntr=1, restraint_wt={}, restraintmask='{}' /".format(msjDic['simRestrForce'], RESTRAINS_DIC[self.getEnumText('minRestrAtoms')])
+
 
         params += '\n&end \nEND'
         with open(mdpFile, 'w') as f:
@@ -616,21 +659,20 @@ class AmberMDSimulation(EMProtocol):
         # else:
         #     prevTrjStr = ''
         if type == 'Minimization':
-            command = '-i {} -c {} -p {} -r {}.ncrst -o {}.o' \
-                       ' -ref {}.crd' \
-                       ' -inf {}.inf'.format(inputFile, crdFile, topFile, *[type] * 4)
+            command = '-i {} -c {} -p {} -ref {} -r {}.ncrst -o {}.o' \
+                       ' -inf {}.inf'.format(inputFile, crdFile, topFile, crdFile, *[type] * 4)
         elif type == 'Heating':
             if self.energyMin.get():
                 crdFile = os.path.abspath(os.path.join(self._getExtraPath(), 'Minimization', 'Minimization.ncrst'))
-            command = '-i {} -c {} -p {} -r {}.ncrst' \
-                      ' -o {}.o -ref {}.crd' \
-                      ' -x {}.netcdf -inf {}.inf'.format(inputFile, crdFile, topFile, *[type] * 5)
+            command = '-i {} -c {} -p {} -ref {} -r {}.ncrst' \
+                      ' -o {}.o ' \
+                      ' -x {}.netcdf -inf {}.inf'.format(inputFile, crdFile, topFile, crdFile, *[type] * 5)
 
         elif type == 'Simulation':
             crdFile = os.path.abspath(os.path.join(self._getExtraPath(), 'Heating', 'Heating.ncrst'))
-            command = '-i {} -c {} -p {} -r {}.ncrst' \
-                      ' -o {}.o -ref {}.crd' \
-                      ' -x {}.netcdf -inf {}.inf'.format(inputFile, crdFile, topFile, *[type] * 5)
+            command = '-i {} -c {} -p {} -ref {} -r {}.ncrst' \
+                      ' -o {}.o' \
+                      ' -x {}.netcdf -inf {}.inf'.format(inputFile, crdFile, topFile, crdFile, *[type] * 5)
 
         if self.useGpu.get():
             os.environ["CUDA_VISIBLE_DEVICES"] = self.gpuList.get()

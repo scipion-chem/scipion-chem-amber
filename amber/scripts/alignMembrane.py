@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 import sys
-import math
 import os.path
 import argparse
 import numpy as np
@@ -216,11 +215,11 @@ if len(ref_coords) != len(mobile_coords):
 # Calculate optimal rotation and translation
 R, t, centroid_mobile = kabsch_alignment(ref_coords, mobile_coords)
 
-print("Rotation matrix:")
-print(R)
-print()
-print("Translation vector:", t)
-print()
+# print("Rotation matrix:")
+# print(R)
+# print()
+# print("Translation vector:", t)
+# print()
 
 # Calculate RMSD before and after
 rmsd_before = calculate_rmsd(ref_coords, mobile_coords)
@@ -241,56 +240,74 @@ ion_count = 0
 membrane_count = 0
 water_count = 0
 
+# First pass: collect all non-protein coordinates
+coords_to_transform = []
+line_data = []
+
+with open(membrane_file, 'r') as f_in:
+    for line in f_in:
+        if line.split()[0] == 'ATOM' or line.split()[0] == 'HETATM':
+            is_non_protein, atom_type = is_non_protein_atom(line)
+
+            if is_non_protein:
+                # Extract coordinates
+                x = float(line[30:38])
+                y = float(line[38:46])
+                z = float(line[46:54])
+                coords_to_transform.append([x, y, z])
+                line_data.append((line, atom_type))
+            else:
+                line_data.append((line, None))
+        else:
+            line_data.append((line, 'special'))
+
+# Transform all coordinates at once
+if len(coords_to_transform) > 0:
+    coords_array = np.array(coords_to_transform)
+    transformed_coords = apply_transformation(coords_array, R, t)
+else:
+    transformed_coords = np.array([])
+
+# Second pass: write output with transformed coordinates
 prev_was_non_protein = False
+coord_idx = 0
 
 with open(output_file, 'w') as f_out:
-    with open(membrane_file, 'r') as f_in:
-        for line in f_in:
-            if line.split()[0] == 'ATOM' or line.split()[0] == 'HETATM':
-                is_non_protein, atom_type = is_non_protein_atom(line)
+    for line, atom_type in line_data:
+        if line.split()[0] == 'ATOM' or line.split()[0] == 'HETATM':
+            if atom_type and atom_type != 'special':
+                # This is a non-protein atom - write with transformed coordinates
+                new_coord = transformed_coords[coord_idx]
+                coord_idx += 1
 
-                # Only process membrane, water, and ion atoms (not protein)
-                if is_non_protein:
-                    # Extract coordinates
-                    x = float(line[30:38])
-                    y = float(line[38:46])
-                    z = float(line[46:54])
+                new_line = (f"{line[0:30]}{new_coord[0]:8.3f}{new_coord[1]:8.3f}"
+                            f"{new_coord[2]:8.3f}{line[54:]}")
+                f_out.write(new_line)
 
-                    # Apply transformation
-                    coord = np.array([x, y, z])
-                    new_coord = apply_transformation(coord.reshape(1, -1), R, t)[0]
+                # Count what we're transforming
+                if atom_type == 'ion':
+                    ion_count += 1
+                elif atom_type == 'water':
+                    water_count += 1
+                elif atom_type == 'membrane':
+                    membrane_count += 1
 
-                    # Write transformed coordinates
-                    new_line = (f"{line[0:30]}{new_coord[0]:8.3f}{new_coord[1]:8.3f}"
-                                f"{new_coord[2]:8.3f}{line[54:]}")
-                    f_out.write(new_line)
-
-                    # Count what we're transforming
-                    if atom_type == 'ion':
-                        ion_count += 1
-                    elif atom_type == 'water':
-                        water_count += 1
-                    elif atom_type == 'membrane':
-                        membrane_count += 1
-
-                    prev_was_non_protein = True
-                else:
-                    prev_was_non_protein = False
-
-                # Skip protein atoms - don't write them
-            elif line.split()[0] == 'TER':
-                # Only write TER if previous atom was non-protein
-                if prev_was_non_protein:
-                    f_out.write(line)
-                    prev_was_non_protein = False
-            elif line.split()[0] == 'END':
+                prev_was_non_protein = True
+            else:
+                prev_was_non_protein = False
+        elif line.split()[0] == 'TER':
+            # Only write TER if previous atom was non-protein
+            if prev_was_non_protein:
                 f_out.write(line)
+                prev_was_non_protein = False
+        elif line.split()[0] == 'END':
+            f_out.write(line)
 
 box_dimensions = get_wat_size(membrane_file)
 if box_dimensions.x > 0:
-    print(f'\nOriginal box X, Y, Z: {box_dimensions.x:.3f} {box_dimensions.y:.3f} {box_dimensions.z:.3f}')
+    print(f'\nBox size X, Y, Z: {box_dimensions.x:.3f} {box_dimensions.y:.3f} {box_dimensions.z:.3f}')
 
-print(f"\nTransformed atoms:")
+print(f"\nAtoms aligned:")
 print(f"  Ions: {ion_count}")
 print(f"  Water: {water_count}")
 print(f"  Membrane: {membrane_count}")
