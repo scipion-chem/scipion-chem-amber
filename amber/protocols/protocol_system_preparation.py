@@ -131,26 +131,6 @@ class AmberSystemPrep(EMProtocol):
                         '“MEMEMBED” performs a geometric search for the best embedding '
                         '“PPM” uses an electrochemical model to calculate the optimal depth and tilt.')
 
-        #
-        # group = form.addGroup('ligand modifications options', condition='ligand == True')
-        # group.addParam('proteinResidues', params.BooleanParam, default=False,
-        #                label='Keep only protein residues: ')
-        # group.addParam('AmberCompatibleResidues', params.BooleanParam, default=False,
-        #                label='Keep only Amber compatible residues: ')
-        # group.addParam('phSimulation', params.BooleanParam, default=False,
-        #                label='Rename GLU, ASP, HIS for constant pH simulation: ')
-        # group.addParam('reduce', params.BooleanParam, default=False,
-        #                label='Run reduce first to add hydrogens: ', help='The addition of hydrogen helps to find the '
-        #                                                                  'hydrogen bond interactions and more favorable '
-        #                                                                  'to us to find binding affinity of ligand '
-        #                                                                  'against protein.')
-        # group.addParam('tleap', params.BooleanParam, default=False,
-        #                label='Use tleap to add missing atoms (EXPERIMENTAL): ')
-        #
-        # group = form.addGroup('Ligand parametrization', condition='ligand == True')
-        # group.addParam('ChargeModel', params.EnumParam,
-        #                choices=self._ChargeModel, allowsNull=True,
-        #                label='Choose the charge model in order to calculate the atomic point charges: ')
         form.addParam('Status', params.EnumParam, allowsNull=True, default=1,
                        choices=self._Status,
                        label='Choose status information: ')
