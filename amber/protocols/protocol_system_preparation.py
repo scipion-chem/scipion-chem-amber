@@ -162,7 +162,7 @@ class AmberSystemPrep(EMProtocol):
         #                    "mismatched with your structure's protonation state.")
         group.addParam('lipidFF', params.EnumParam, condition='tMem',
                        label='Type',choices=['lipid21','lipid17'], default=0)
-        group.addParam('WaterForceField', params.EnumParam, default=1,
+        group.addParam('WaterForceField', params.EnumParam, default=0,
                        choices=['tip4pew', 'spce', 'spceb', 'opc', 'opc3', 'tip3p'],
                        allowsNull=True,
                        label='Water Force Field',
@@ -177,7 +177,7 @@ class AmberSystemPrep(EMProtocol):
                              'with format 1º Residue - 2º Residue / 1º Residue - 2º Residue')
 
         group = form.addGroup('Solvent box')
-        group.addParam('SolvateStep', params.EnumParam, default=0, condition='tMem==False',
+        group.addParam('solvateStep', params.EnumParam, default=0, condition='tMem==False',
                        choices=['Cubic', 'Octahedric'], defalult='Cubic',
                        label='Solvation box',
                        help='Both solvation boxes will be isometric')
@@ -220,10 +220,12 @@ class AmberSystemPrep(EMProtocol):
         molName = os.path.basename(molFile).split(".")[0]
         prepLigFile = f'{molName}_prep.mol2'
 
-        nc = self.ligNetCharge.get()
+        # nc = self.ligNetCharge.get()
 
         # params = ' -i {}.LIG.pdb -fi pdb -o {}.LIG.mol2 -fo mol2 '.format(*[systemBasename]*2)
-        params = ' -i {} -fi sdf -o {} -fo mol2 -nc {} -rn LIG '.format(molFile, prepLigFile, nc)
+        # params = ' -i {} -fi sdf -o {} -fo mol2 -nc {} -rn LIG '.format(molFile, prepLigFile, nc)
+        params = ' -i {} -fi sdf -o {} -fo mol2 -rn LIG '.format(molFile, prepLigFile)
+
 
         if self.getEnumText('ligandCharge') == 'RESP':
             params += '-c resp '
@@ -351,12 +353,12 @@ class AmberSystemPrep(EMProtocol):
 
         # solvation non-membrane
         if not hasMembrane:
-            boxtype = "SolvateBox" if self.getEnumText("SolvateStep") == "Cubic" else "SolvateOct"
+            boxtype = "SolvateBox" if self.getEnumText("solvateStep") == "Cubic" else "SolvateOct"
 
             waterBoxes = {
                 "tip3p": "TIP3PBOX",
                 "tip4pew": "TIP4PEWBOX",
-                "spece": "SPCEBOX",
+                "spce": "SPCBOX",
                 "opc": "OPCBOX",
                 "opc3": "OPC3BOX"
             }
@@ -364,7 +366,7 @@ class AmberSystemPrep(EMProtocol):
             wat = waterBoxes[waterModel]
 
             cmdsTleap.append("charge SYSTEM")
-            cmdsTleap.append(f"{boxtype} SYSTEM {wat} {self.minDist.get()} iso")
+            cmdsTleap.append(f"{boxtype} SYSTEM {wat} {int(self.minDist.get())} iso")
             cmdsTleap.append(f"addIonsRand SYSTEM {self.getEnumText('cationType')} {nCation} {self.getEnumText('anionType')} {nAnion}")
 
         # solvation membrane

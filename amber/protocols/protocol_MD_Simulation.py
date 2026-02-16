@@ -126,12 +126,12 @@ class AmberMDSimulation(EMProtocol):
                        help='Insert the defined Minimization step into the workflow on the defined position (number).\n'
                             'The default (when empty) is the last position')
         group = form.addGroup('Heating - NVT')
-        line = group.addLine('Simulation time: ',
+        line = group.addLine('Heating simulation time: ',
                              help='Time settings\n'
                                   'Number of MD steps to run '
                                   'Time step in ps. (Number of MD steps * Time step = run length in ps)'
                                   'Trajectory step size: The trajectory coordinates are written to a traj file every x steps.')
-        line.addParam('heatMDSteps', params.IntParam, default=5000,
+        line.addParam('heatMDSteps', params.IntParam, default=10000,
                        label='Number of MD steps:',
                        help='Number of MD steps in run (x * time step = run length in ps)')
         line.addParam('heatTimeStep', params.FloatParam, default=0.002,
@@ -184,7 +184,7 @@ class AmberMDSimulation(EMProtocol):
                                   'Number of MD steps to run '
                                   'Time step in ps. (Number of MD steps * Time step = run length in ps)'
                                   'Trajectory step size: The trajectory coordinates are written to a traj file every x steps.')
-        line.addParam('simMDSteps', params.IntParam, default=10000,
+        line.addParam('simMDSteps', params.IntParam, default=100000,
                       label='Number of MD steps:',
                       help='Number of MD steps in run (nstlim * dt = run length in ps)')
         line.addParam('simTimeStep', params.FloatParam, default=0.002,
@@ -404,17 +404,23 @@ class AmberMDSimulation(EMProtocol):
 
             if stepType == 'Minimization':
                 lineText += 'Max Cycles: {}'.format(msjDic.get('MaxCycles', 0))
+                if msjDic['Restraint']:
+                    lineText += ', restraint on {}'.format(msjDic.get('RestrAtoms'))
 
             elif stepType == 'Heating':
                 nTime = msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.002)
                 lastTemp = msjDic.get('FiTemp', 300)
                 lineText += 'Sim. time: {} ps, NVT ensemble, {} K to {} K'.format(
                     nTime, msjDic.get('InTemp', 0), lastTemp)
+                if msjDic['Restraint']:
+                    lineText += ', restraint on {}'.format(msjDic.get('RestrAtoms'))
 
             else:  # Simulation
                 nTime = msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.002)
                 lineText += 'Sim. time: {} ps, {} ensemble, {} K'.format(
                     nTime, msjDic.get('EnsemType', 'NPT'), lastTemp)
+                if msjDic['Restraint']:
+                    lineText += ', restraint on {}'.format(msjDic.get('RestrAtoms'))
 
             sumStr += lineText + '\n'
         return sumStr
@@ -519,10 +525,10 @@ class AmberMDSimulation(EMProtocol):
         for paramName, param in self._definition.iterAllParams():
             if not paramName in self._omitParamNames and not isinstance(param, params.Group) and not isinstance(param,
                                                                                                                 params.Line):
-                if type == 'All':
-                    paramsDic[paramName] = param
+                # if type == 'All':
+                #     paramsDic[paramName] = param
 
-                elif prefix and paramName.startswith(prefix):
+                if prefix and paramName.startswith(prefix):
                     cleanName = paramName[len(prefix):]
 
                     if isinstance(param, params.EnumParam):
@@ -530,8 +536,7 @@ class AmberMDSimulation(EMProtocol):
                     else:
                         paramsDic[cleanName] = getattr(self, paramName).get()
 
-        if type != 'All':
-            paramsDic['stepType'] = type
+        paramsDic['stepType'] = type
 
         return paramsDic
 
@@ -562,7 +567,10 @@ class AmberMDSimulation(EMProtocol):
         '''Generate .in file'''
         stepType = msjDic['stepType']
         stageDir = self._getExtraPath('{}_{}'.format(i, stepType))
-        os.mkdir(stageDir)
+        if os.path.exists(stageDir):
+            shutil.rmtree(stageDir)
+        os.makedirs(stageDir)
+
         mdpFile = os.path.join(stageDir, '{}_{}.in'.format(i, stepType))
 
         params = ''
