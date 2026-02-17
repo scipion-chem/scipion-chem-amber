@@ -101,5 +101,4 @@ class Plugin(pwchem.Plugin):
 
     @classmethod
     def getPmemdBin(cls, prog='pmemd.cuda '):
-        """ Retorna la ruta al binario pmemd configurado. """
         return join(cls.getVar(AMBER_DIC['pmemd_home']), 'bin', prog)

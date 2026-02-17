@@ -26,11 +26,11 @@ setup(
     name='scipion-chem-amber',  # Required
     version='0.1',  # Required
     description='Scipion amber plugin.',  # Required
-    long_description= 'Scipion AMBER plugin for Scipion. Aida Pinacho Master Thesis',  # Optional
+    long_description= 'Scipion AMBER plugin for Scipion.',  # Optional
     url='https://github.com/scipion-chem/scipion-chem-amber',  # Optional
-    author='Aida Pinacho',  # Optional
-    #author_email='you@yourinstitution.email',  # Optional
-    #keywords='',  # Optional
+    author='Aida Pinacho, Joaquin Algorta',  # Optional
+    author_email='joaquin.algorta@cnb.csic.es',  # Optional
+    keywords='Molecular Dynamics',  # Optional
     packages=find_packages(),
     install_requires=[requirements],
     entry_points={'pyworkflow.plugin': 'amber=amber'},
