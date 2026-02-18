@@ -26,8 +26,8 @@
 # **************************************************************************
 
 # Imports
-from pwchem.wizards import DeleteElementWizard, VariableWizard, SelectElementWizard, \
-    WatchElementWizard
+from pwchem.wizards import DeleteElementWizard, VariableWizard, WatchElementWizard
+
 from ..protocols import AmberMDSimulation
 from ..constants import *
 
@@ -52,13 +52,12 @@ class AmberAddElementSummaryWizard(VariableWizard):
         else:
             index = numSteps + 1
 
-        msjDic = protocol.getStageParamsDicNew(stageType)
+        msjDic = protocol.getStageParamsDic(stageType)
 
         if index > numSteps:
             prevStr = getattr(protocol, outputParam[0]).get() \
                 if getattr(protocol, outputParam[0]).get() is not None else ''
             form.setVar(outputParam[0], prevStr + str(msjDic) + '\n')
-            print(protocol.workFlowSteps.get())
 
             newSum = protocol.createSummary()
             form.setVar(outputParam[1], newSum)
@@ -67,7 +66,6 @@ class AmberAddElementSummaryWizard(VariableWizard):
             workSteps = getattr(protocol, outputParam[0]).get().split('\n')
             workSteps.insert(index-1, str(msjDic))
             form.setVar(outputParam[0], '\n'.join(workSteps))
-            print(protocol.workFlowSteps.get())
 
             newSum = protocol.createSummary()
             form.setVar(outputParam[1], newSum)
@@ -120,7 +118,6 @@ class AmberAddDefaultWorkflow(VariableWizard):
 
         # Set the workflow steps
         form.setVar(outputParam[0], workflowSteps)
-        print(protocol.workFlowSteps.get())
 
         # Generate and set summary using the unified function
         newSum = protocol.createSummary(workflowSteps)

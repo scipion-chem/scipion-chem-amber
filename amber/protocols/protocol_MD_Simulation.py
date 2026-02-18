@@ -28,9 +28,6 @@
 This module will perform energy minimizations and equilibrium for the system befor MD simultion
 """
 import os, glob, shutil
-from cProfile import label
-from email.policy import default
-from os.path import join
 
 from pyworkflow.protocol import params
 from pyworkflow.utils import Message, runJob, createLink
@@ -47,8 +44,8 @@ from amber import Plugin as amberPlugin
 
 class AmberMDSimulation(EMProtocol):
     """
-        This protocol will perform energy minimization and equilibrium on the system previously prepared by the protocol
-         "system prepartion". This step is necessary to energy minimize the system in order to avoid unwanted conformations.
+    This protocol will perform energy minimization heating and similation on the system previously prepared by the protocol
+    "system prepartion".
     """
     _amberEngines = ['sander', 'pmemd']
     _label = 'run MD simulation'
@@ -195,7 +192,7 @@ class AmberMDSimulation(EMProtocol):
 
         group.addParam('simEnsemType', params.EnumParam,
                        label='Simulation type: ',
-                       choices=self._ensemTypes, default=0,
+                       choices=self._ensemTypes, default=1,
                        help='Type of simulation to perform: NVT or NPT\n')
         line = group.addLine('Simulation temperature control: ',
                              help='Thermostat type and associated params')
@@ -283,65 +280,9 @@ class AmberMDSimulation(EMProtocol):
         self._insertFunctionStep('createOutputStep')
 
     def simulateStageStep(self, wStep, i):
-        if wStep in ['', None]:
-            msjDic = self.createMSJDic()
-        else:
-            msjDic = eval(wStep)
-            mdpFile = self.generateMDPFile(msjDic, str(i))
-
-            tprFile = self.callAmber(mdpFile)
-            # self.callMDRun(tprFile, saveTrj=msjDic['saveTrj'])
-
-    def minimizationStep(self):
-        msjDic = self.getStageParamsDicNew('Minimization')
-        if self.minCustomIn.get():
-            mdpFile = self.customMDPFile(msjDic, 'Minimization')
-        else:
-            mdpFile = self.generateMDPFile(msjDic, 'Minimization')
-
-        outFile = self.callAmber(mdpFile, 'Minimization')
-
-    def heatingStep(self):
-        msjDic = self.getStageParamsDicNew('Heating')
-        if self.heatCustomIn.get():
-            mdpFile = self.customMDPFile(msjDic, 'Heating')
-        else:
-            mdpFile = self.generateMDPFile(msjDic, 'Heating')
-
-        outFile = self.callAmber(mdpFile, 'Heating')
-
-    def simulationStep(self):
-        msjDic = self.getStageParamsDicNew('Simulation')
-        if self.simCustomIn.get():
-            mdpFile = self.customMDPFile(msjDic, 'Simulation')
-        else:
-            mdpFile = self.generateMDPFile(msjDic, 'Simulation')
-
-        outFile = self.callAmber(mdpFile, 'Simulation')
-
-    # def createOutputStep(self):
-    #     CrdAmberFile, localTopFile = self._getPath('crdFile.crd'), self._getPath('systemTopology.parm7')
-    #     shutil.copyfile(self.amberSystem.get().getCrdFile(), CrdAmberFile)
-    #     shutil.copyfile(self.amberSystem.get().getTopologyFile(), localTopFile)
-    #
-    #     outTrj = self.getSimTrajStepFile()
-    #     outputTrajectory = self._getPath('outputTrajectory.netcdf')
-    #     shutil.copyfile(outTrj, outputTrajectory)
-    #
-    #     system_visualization = self._getPath(os.path.basename(self.amberSystem.get().getFileName()))
-    #     shutil.copyfile(self.amberSystem.get().getFileName(), system_visualization)
-    #
-    #     mFF, wFF = self.getFFFiles()
-    #     nFrames = self.getNFrames()
-    #     nTime = nFrames * self.simTimeStep.get()
-    #
-    #     outSystem = AmberSystem(filename=system_visualization, ff=mFF, wff=wFF, nFrames=nFrames, nTime=nTime)
-    #
-    #     outSystem.setTopologyFile(localTopFile)
-    #     if outTrj:
-    #         outSystem.setTrajectoryFile(outputTrajectory)
-    #
-    #     self._defineOutputs(outputSystem=outSystem)
+        msjDic = eval(wStep)
+        mdpFile = self.generateMDPFile(msjDic, str(i))
+        self.callAmber(mdpFile)
 
     def createOutputStep(self):
         lastCrdFile, lastTopoFile, lastOutFile = self.getPrevFinishedStageFiles()
@@ -380,89 +321,45 @@ class AmberMDSimulation(EMProtocol):
         return summary
 
     def createSummary(self, workSteps=None):
-        '''Creates the displayed summary from workflow steps'''
-        sumStr = ''
-        lastTemp = 300  # default
-
-        # If no workSteps provided, use the protocol's workFlowSteps
+        """Creates the displayed summary from workflow steps string."""
         if workSteps is None:
             workSteps = self.workFlowSteps.get()
-
-        if not workSteps or workSteps.strip() == '':
+        if not workSteps or not workSteps.strip():
             return ''
 
-        lines = workSteps.split('\n')
-        for i, dicLine in enumerate(lines):
-            if dicLine.strip() == '':
+        sumStr = ''
+        lastTemp = 300
+        for i, dicLine in enumerate(workSteps.split('\n')):
+            if not dicLine.strip():
                 continue
-
-            msjDic = eval(dicLine)
-            msjDic = self.addDefaultForMissing(msjDic)
+            msjDic = self.addDefaultForMissing(eval(dicLine))
             stepType = msjDic.get('stepType', 'Step')
-
-            lineText = '{}) {} - '.format(i + 1, stepType)
+            lineText = f'{i + 1}) {stepType} - '
 
             if stepType == 'Minimization':
-                lineText += 'Max Cycles: {}'.format(msjDic.get('MaxCycles', 0))
-                if msjDic['Restraint']:
-                    lineText += ', restraint on {}'.format(msjDic.get('RestrAtoms'))
+                lineText += f"Max Cycles: {msjDic.get('MaxCycles', 0)}"
+                if msjDic.get('Restraint'):
+                    lineText += f", restraint on {msjDic.get('RestrAtoms')}"
 
             elif stepType == 'Heating':
                 nTime = msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.002)
                 lastTemp = msjDic.get('FiTemp', 300)
-                lineText += 'Sim. time: {} ps, NVT ensemble, {} K to {} K'.format(
-                    nTime, msjDic.get('InTemp', 0), lastTemp)
-                if msjDic['Restraint']:
-                    lineText += ', restraint on {}'.format(msjDic.get('RestrAtoms'))
+                lineText += f"Sim. time: {nTime} ps, NVT ensemble, {msjDic.get('InTemp', 0)} K to {lastTemp} K"
+                if msjDic.get('Restraint'):
+                    lineText += f", restraint on {msjDic.get('RestrAtoms')}"
 
             else:  # Simulation
                 nTime = msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.002)
-                lineText += 'Sim. time: {} ps, {} ensemble, {} K'.format(
-                    nTime, msjDic.get('EnsemType', 'NPT'), lastTemp)
-                if msjDic['Restraint']:
-                    lineText += ', restraint on {}'.format(msjDic.get('RestrAtoms'))
-
-            sumStr += lineText + '\n'
-        return sumStr
-
-    def createDefaultSummary(self, workSteps):
-        '''Creates the default summary from the internal state of the steps'''
-        sumStr = ''
-        lastTemp = 300 # default
-        lines = workSteps.split('\n')
-        for i, dicLine in enumerate(lines):
-            if dicLine.strip() == '':
-                continue
-
-            msjDic = eval(dicLine)
-            msjDic = self.addDefaultForMissing(msjDic)
-            stepType = msjDic.get('stepType', 'Step')
-
-            lineText = '{}) {} - '.format(i + 1, stepType)
-
-            if stepType == 'Minimization':
-                lineText += 'Max Cycles: {}'.format(msjDic.get('maxCycles', 0))
-
-            elif stepType == 'Heating':
-                nTime = msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.002)
-                lastTemp = msjDic.get('FiTemp')
-                lineText += 'Sim. time: {} ps, NVT ensemble, {} K to {} K'.format(
-                    nTime, msjDic.get('InTemp'), lastTemp)
-
-            else:
-                nTime = msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.002)
-                lineText += 'Sim. time: {} ps, {} ensemble, {} K'.format(
-                    nTime, msjDic.get('EnsemType'), lastTemp)
+                lineText += f"Sim. time: {nTime} ps, {msjDic.get('EnsemType', 'NPT')} ensemble, {lastTemp} K"
+                if msjDic.get('Restraint'):
+                    lineText += f", restraint on {msjDic.get('RestrAtoms')}"
 
             sumStr += lineText + '\n'
         return sumStr
 
     def createGUISummary(self):
         with open(self._getExtraPath("summary.txt"), 'w') as f:
-            if self.workFlowSteps.get():
-                f.write(self.createSummary())
-            else:
-                f.write(self.createSummary(self.createMSJDic()))
+            f.write(self.createSummary())
 
     def _methods(self):
         methods = []
@@ -481,71 +378,33 @@ class AmberMDSimulation(EMProtocol):
         steps = [step for step in workStepsStr.split('\n') if step.strip() != '']
         return len(steps)
 
-    def getStageParamsDic(self, type='All'):
-        '''Return a dictionary as {paramName: param} of the stage parameters of the formulary.
-        Type'''
+    def getStageParamsDic(self, stageType):
+        """Return {cleanParamName: value} for parameters belonging to the given stage type."""
+        prefix = self._key_map.get(stageType, '')
         paramsDic = {}
         for paramName, param in self._definition.iterAllParams():
-            if not paramName in self._omitParamNames and not isinstance(param, params.Group) and not isinstance(param,
-                                                                                                                params.Line):
-                if type == 'All':
-                    paramsDic[paramName] = param
-                elif type == 'Enum' and isinstance(param, params.EnumParam):
-                    paramsDic[paramName] = param
-                elif type == 'Normal' and not isinstance(param, params.EnumParam):
-                    paramsDic[paramName] = param
-        return paramsDic
-
-    def createMSJDic(self, stageType):
-        msjDic = {}
-        for pName in self.getStageParamsDicNew(type='Normal').keys():
-            if hasattr(self, pName):
-                msjDic[pName] = getattr(self, pName).get()
-            else:
-                print('Something is wrong with parameter ', pName)
-
-        for pName in self.getStageParamsDicNew(type='Enum').keys():
-            if hasattr(self, pName):
-                msjDic[pName] = self.getEnumText(pName)
-            else:
-                print('Something is wrong with parameter ', pName)
-        return msjDic
-
-    def getStageParamsDicNew(self, type):
-        '''Return a dictionary as {paramName: param} of the stage parameters of the formulary.
-        Type'''
-        paramsDic = {}
-        if type == 'Minimization':
-            prefix = "min"
-        elif type == 'Heating':
-            prefix = "heat"
-        elif type == 'Simulation':
-            prefix = "sim"
-
-        for paramName, param in self._definition.iterAllParams():
-            if not paramName in self._omitParamNames and not isinstance(param, params.Group) and not isinstance(param,
-                                                                                                                params.Line):
-                # if type == 'All':
-                #     paramsDic[paramName] = param
-
-                if prefix and paramName.startswith(prefix):
-                    cleanName = paramName[len(prefix):]
-
-                    if isinstance(param, params.EnumParam):
-                        paramsDic[cleanName] = self.getEnumText(paramName)
-                    else:
-                        paramsDic[cleanName] = getattr(self, paramName).get()
-
-        paramsDic['stepType'] = type
-
+            if paramName in self._omitParamNames:
+                continue
+            if isinstance(param, (params.Group, params.Line)):
+                continue
+            if prefix and paramName.startswith(prefix):
+                cleanName = paramName[len(prefix):]
+                if isinstance(param, params.EnumParam):
+                    paramsDic[cleanName] = self.getEnumText(paramName)
+                else:
+                    paramsDic[cleanName] = getattr(self, paramName).get()
+        paramsDic['stepType'] = stageType
         return paramsDic
 
     def addDefaultForMissing(self, msjDic):
-        '''Add default values for missing parameters in the msjDic'''
-        paramDic = self.getStageParamsDic()
-        for pName in paramDic.keys():
-            if not pName in msjDic:
-                msjDic[pName] = paramDic[pName].default
+        """Add default values for any parameters missing from msjDic."""
+        for paramName, param in self._definition.iterAllParams():
+            if paramName in self._omitParamNames:
+                continue
+            if isinstance(param, (params.Group, params.Line)):
+                continue
+            if paramName not in msjDic:
+                msjDic[paramName] = param.default
         return msjDic
 
     def customMDPFile(self, msjDic, type):
@@ -752,42 +611,9 @@ class AmberMDSimulation(EMProtocol):
 
         return os.path.abspath(crdFile), os.path.abspath(topFile), outFile
 
-    def checkIfPrevTrj(self, stageNum):
-        if stageNum == '1':
-            return False
-        else:
-            prevDir = self._getExtraPath('stage_{}'.format(int(stageNum) - 1))
-            for file in os.listdir(prevDir):
-                if '.netcdf' in file:
-                    return os.path.join(prevDir, file)
-        return False
-
-    def getTrjFiles(self):
-        trjFiles = []
-        stagesDirs = natural_sort(glob.glob(self._getExtraPath()), rev=True)
-        for sDir in stagesDirs:
-            cont = False
-            for file in os.listdir(sDir):
-                if '.netcdf' in file:
-                    trjFiles.append(os.path.abspath(os.path.join(sDir, file)))
-                    cont = True
-            if not cont:
-                break
-        trjFiles.reverse()
-        return trjFiles
-
-    def getNFrames(self):
-        nFrames = self.simMDSteps.get() // self.simTrajStep.get()
-        return nFrames
-
     def getFFFiles(self):
         system = self.amberSystem.get()
         return system.getForceField(), system.getWaterForceField()
-
-    def countSteps(self):
-        stepsStr = self.summarySteps.get() if self.summarySteps.get() is not None else ''
-        steps = stepsStr.split('\n')
-        return len(steps) - 1
 
     def getStageDir(self, stage):
         """ Returns the directory path for a given stage number.

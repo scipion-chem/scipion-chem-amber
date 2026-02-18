@@ -27,26 +27,20 @@
 """
 This module will prepare the system for the simulation
 """
-from email.policy import default
-from os.path import relpath, abspath
+from os.path import abspath
 
-import os
-import re
-import numpy as np
-import math
+import os, re, math, shutil
 
 from pwem.protocols import EMProtocol, ProtImportFiles
-from pyparsing import conditionAsParseAction
 from pyworkflow.protocol import params
 from pyworkflow.utils import Message
 
 from pwchem.constants import RDKIT_DIC, OPENBABEL_DIC
-from pwchem.utils import getBaseName, convertToSdf
+from pwchem.utils import getBaseName, convertToSdf, runOpenBabel
 from pwchem import Plugin as pwchemPlugin
 
 import amber
 from amber import Plugin as amberPlugin
-from pwchem.utils import runOpenBabel
 
 import amber.objects as amberobj
 from amber.objects import *
@@ -67,14 +61,14 @@ class AmberSystemPrep(EMProtocol):
     IMPORT_FROM_FILE = 1
     IMPORT_FROM_SCIPION = 1
 
-    _ChargeModel = ['RESP', 'AM1-BCC', 'CM1', 'CM2', 'ESP', 'Mulliken', 'Gasteiger']
+    _ChargeModel = ['AM1-BCC', 'Mulliken', 'Gasteiger']
     _Status = ['brief', 'default', 'verbose']
 
     # -------------------------- DEFINE param functions ----------------------
 
     def __init__(self, **kwargs):
         EMProtocol.__init__(self, **kwargs)
-        ProtImportFiles.__init__(self, **kwargs)
+        # ProtImportFiles.__init__(self, **kwargs)
 
 
     def _defineParams(self, form):
@@ -145,21 +139,14 @@ class AmberSystemPrep(EMProtocol):
                        label='Protein Force Field', help='Protein force filed to use',
                        choices=['ff14SB', 'ff19SB', 'ff14SBonlysc', 'ff15ipq', 'fb15', 'ff03.r1', 'ff03ua'],
                        default=0)
-        # group.addParam('protNetCharge', params.IntParam, default=0, expertLevel=params.LEVEL_ADVANCED,
-        #               label='Target net charge: ',
-        #               help="Enter the integer net charge of the molecule. \n")
-        group.addParam('ligandCharge', params.EnumParam, default=2, choices=['AM1-BCC', 'Mulliken', 'Gasteiger'],
+
+        group.addParam('ligandCharge', params.EnumParam, default=2, choices=self._ChargeModel,
                        condition=LIG_INPUT, label="Small molecules charge method: ",
                        help='Small molecules charge method to use')
         group.addParam('ligandFF', params.EnumParam, default=1, choices=['gaff', 'gaff2', 'ESPALOMA'],
                       condition=LIG_INPUT, label="Small molecules force field: ",
                       help='Small molecules force field to use')
 
-        # group.addParam('ligNetCharge', params.IntParam, default=0, expertLevel=params.LEVEL_ADVANCED,
-        #               label='Ligand net charge: ', condition=LIG_INPUT,
-        #               help="Enter the integer net charge of the molecule. \n"
-        #                    "If antechamber reports an 'odd number of electrons', your charge is likely "
-        #                    "mismatched with your structure's protonation state.")
         group.addParam('lipidFF', params.EnumParam, condition='tMem',
                        label='Type',choices=['lipid21','lipid17'], default=0)
         group.addParam('WaterForceField', params.EnumParam, default=0,
@@ -198,7 +185,6 @@ class AmberSystemPrep(EMProtocol):
         line.addParam('ionConc', params.FloatParam, label='Concentration (M):',
                       default=0.15, help='Salt concentration of the system')
 
-        ## AÑADIR CATION ANION Y MOLARIDAD
     # --------------------------- STEPS functions ------------------------------
 
     def _insertAllSteps(self):
@@ -220,10 +206,6 @@ class AmberSystemPrep(EMProtocol):
         molName = os.path.basename(molFile).split(".")[0]
         prepLigFile = f'{molName}_prep.mol2'
 
-        # nc = self.ligNetCharge.get()
-
-        # params = ' -i {}.LIG.pdb -fi pdb -o {}.LIG.mol2 -fo mol2 '.format(*[systemBasename]*2)
-        # params = ' -i {} -fi sdf -o {} -fo mol2 -nc {} -rn LIG '.format(molFile, prepLigFile, nc)
         params = ' -i {} -fi sdf -o {} -fo mol2 -rn LIG '.format(molFile, prepLigFile)
 
 
@@ -418,7 +400,6 @@ class AmberSystemPrep(EMProtocol):
         )
         amberPlugin.runScript(self, 'alignMembrane.py', args=scriptParams, env=AMBER_DIC,
                               cwd=self.getTargetFileDir())
-        # amber.Plugin.runAmbertools(self, '{} -cq -d'.format(self.getPymolBin()), f'"{pymolCmd}"', cwd=self.getTargetFileDir())
 
     def createOutputStep(self):
         systemBasename = self.getSystemName()
@@ -445,7 +426,6 @@ class AmberSystemPrep(EMProtocol):
             createdSystem.setLigTopologyFile(molFile)
 
         self._defineOutputs(outputSystem=createdSystem)
-        # self._defineSourceRelation(self.inputLigand, createdSystem)
 
     # --------------------------- INFO functions -----------------------------------
     def getReceptorPDB(self):
@@ -534,8 +514,6 @@ class AmberSystemPrep(EMProtocol):
         nCation = int(math.ceil(nIons - (totalQ / 2)))
         nAnion = int(math.ceil(nIons + (totalQ / 2)))
 
-        # Final check: Ensure we don't return negative ions
-        # (can happen with very high charge and very low No)
         nCation = max(0, nCation)
         nAnion = max(0, nAnion)
 
@@ -627,9 +605,6 @@ class AmberSystemPrep(EMProtocol):
                     return os.path.join(directory, f)
         return None
 
-    def getSystemName(self):
-      return getBaseName(self.getReceptorFilename())
-
     def extractBoxFromMemgenLog(self, logFile):
         """
         Reads packmol-memgen.log and extracts boxsize x_len, y_len, z_len.
@@ -654,6 +629,3 @@ class AmberSystemPrep(EMProtocol):
         z_len = float(z_match.group(1))
 
         return x_len, y_len, z_len
-
-    def getPymolBin(self):
-        return pwchemPlugin.getEnvPath(OPENBABEL_DIC, 'bin/pymol')

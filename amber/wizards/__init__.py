@@ -5,4 +5,4 @@
 # **************************************************************************
 
 from .wizard_for_MD_sim import *
-from .Wizard_for_SmallMols import *
+from .wizard_for_SmallMols import *

@@ -46,7 +46,7 @@ class Plugin(pwchem.Plugin):
         """
         cls._defineEmVar(AMBER_DIC['home'], cls.getEnvName(AMBER_DIC))
         cls._defineVar("AMBERTOOLS_ENV_ACTIVATION", 'conda activate %s' % cls.getEnvName(AMBER_DIC))
-        cls._defineEmVar(AMBER_DIC['pmemd_home'], 'pmemd24')
+        cls._defineEmVar(AMBER_DIC['pmemd_home'], f'pmemd24')
 
 
     @classmethod
@@ -71,15 +71,6 @@ class Plugin(pwchem.Plugin):
 
         installer = InstallHelper(AMBER_DIC['name'], packageHome=cls.getVar(AMBER_DIC['home']),
                                   packageVersion=AMBER_DIC['version'])
-
-        AMBER_INSTALLED = f'{AMBER}_{V2025}_installed'
-
-        installer.addCommand(f'conda create -y -n {cls.getEnvName(AMBER_DIC)}','AMBER_ENV_CREATED'
-            ).addCommand(f'{cls.getCondaActivationCmd()} {cls.getAmbertoolsEnvActivation()} && '
-            f'conda install -y -c dacase -c conda-forge ambertools-dac=25 compilers',
-            'AMBERTOOLS_INSTALLED'
-            ).addCommand(f'touch {AMBER_INSTALLED}',AMBER_INSTALLED
-            ).addPackage(env, dependencies=['conda'], default=True)
 
     # ---------------------------------- Utils functions  -----------------------
     @classmethod
