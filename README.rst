@@ -18,7 +18,7 @@ Then you have to follow the following steps:
 
 .. code-block::
 
-    scipion3 installp -p path_to_scipion-chem-amber --devel -j <numberOfProcessors>
+    scipion3 installp -p path_to_scipion-chem-amber --devel 
 
 OR
 
@@ -27,4 +27,12 @@ OR
 .. code-block::
 
     scipion3 installp -p path_to_scipion-chem-amber
+
+**Binary files** 
+
+AmberTools is automatically installed but it can only run simulations on CPU. 
+To enable the GPU acceleration, non-comercial **Amber24 suite** is required.
+You must either install pmemd in the EM_ROOT (typically: SCIPION_HOME/software/em/amber-202*-*)
+or define the path of pmemd24 in scipion.conf as PMEMD_HOME.
+For official installation instructions, visit: <https://ambermd.org/GetAmber.php#amber> 
 
