@@ -46,6 +46,8 @@ class AmberAddElementSummaryWizard(VariableWizard):
             stageType = 'Heating'
         elif 'sim' in form.wizParamName:
             stageType = 'Simulation'
+        elif 'custom' in form.wizParamName:
+            stageType = 'Custom'
 
         if getattr(protocol, inputParam[0]).get().strip() != '':
             index = int(getattr(protocol, inputParam[0]).get())
@@ -85,15 +87,20 @@ AmberAddElementSummaryWizard().addTarget(protocol=AmberMDSimulation,
                                   inputs=['simInsertStep'],
                                   outputs=['workFlowSteps', 'summarySteps'])
 
+AmberAddElementSummaryWizard().addTarget(protocol=AmberMDSimulation,
+                                  targets=['customInsertStep'],
+                                  inputs=['customInsertStep'],
+                                  outputs=['workFlowSteps', 'summarySteps'])
+
 DeleteElementWizard().addTarget(protocol=AmberMDSimulation,
                                 targets=['deleteStep'],
                                 inputs=['deleteStep'],
                                 outputs=['workFlowSteps', 'summarySteps'])
 
-WatchElementWizard().addTarget(protocol=AmberMDSimulation,
-                                targets=['watchStep'],
-                                inputs=['watchStep'],
-                                outputs=['workFlowSteps', 'summarySteps'])
+# WatchElementWizard().addTarget(protocol=AmberMDSimulation,
+#                                 targets=['watchStep'],
+#                                 inputs=['watchStep'],
+#                                 outputs=['workFlowSteps', 'summarySteps'])
 
 
 class AmberAddDefaultWorkflow(VariableWizard):

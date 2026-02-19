@@ -59,9 +59,9 @@ class AmberMDSimulation(EMProtocol):
 
     _omitParamNames = ['amberSystem', 'runName', 'runMode', 'insertStep', 'summarySteps', 'deleteStep', 'watchStep',
                        'workFlowSteps', 'hostName', 'numberOfThreads', 'numberOfMpi', 'minInsertStep', 'heatInsertStep',
-                       'simInsertStep']
+                       'simInsertStep', 'customInsertStep']
 
-    _key_map = {'Minimization': 'min', 'Heating': 'heat', 'Simulation': 'sim'}
+    _key_map = {'Minimization': 'min', 'Heating': 'heat', 'Simulation': 'sim', 'Custom': 'custom'}
 
     _restrained_groups = list(RESTRAINS_DIC.keys())
 
@@ -112,12 +112,6 @@ class AmberMDSimulation(EMProtocol):
                          label='Atoms to restrain')
         lineMin.addParam('minRestrForce', params.FloatParam, default=50.0,
                          label='Force (kcal·mol-1·Å-2)')
-
-        group.addParam('minCustomIn', params.TextParam, width=60, readOnly=True, default=None,
-                       label='Input sander/pmemd', expertLevel=params.LEVEL_ADVANCED, condition='energyMin',
-                       help='Upload a custom configuration file for the Minimization step.'
-                            'Providing a file here will override all other Minimization parameters defined in the interface. For detailed syntax and options, '
-                            'refer to the Amber Manual https://ambermd.org/doc12/Amber25.pdf.')
         group.addParam('minInsertStep', params.StringParam, default='',
                        label='Insert Minimization step number: ',
                        help='Insert the defined Minimization step into the workflow on the defined position (number).\n'
@@ -153,12 +147,6 @@ class AmberMDSimulation(EMProtocol):
                       label='Coupling constant (1/ps): ', condition='heatThermostat==2')
         line.addParam('heatFricConst', params.FloatParam, default=2.0,
                       label='Friction constant (1/ps): ', condition='heatThermostat==3')
-
-        group.addParam('heatCustomIn', params.TextParam, width=60, readOnly=True, default=None,
-                       label='Input sander/pmemd', expertLevel=params.LEVEL_ADVANCED,
-                       help='Upload a custom configuration file for the Heating step.'
-                            'Providing a file here will override all other Heating parameters defined in the interface. For detailed syntax and options, '
-                            'refer to the Amber Manual https://ambermd.org/doc12/Amber25.pdf.')
 
         group.addParam('heatRestraint', params.BooleanParam, default=False,
                        label='Add restrains',
@@ -215,12 +203,6 @@ class AmberMDSimulation(EMProtocol):
         line.addParam('simPressureScaling', params.EnumParam, default=1, condition='simEnsemType==1',
                       label='Pressure scaling: ', choices=self._coupleStyle)
 
-        group.addParam('simCustomIn', params.TextParam, width=60, readOnly=True, default=None,
-                       label='Input sander/pmemd', expertLevel=params.LEVEL_ADVANCED,
-                       help='Upload a custom configuration file for the MD simulation.'
-                            'Providing a file here will override all other simulation parameters defined in the interface. For detailed syntax and options, '
-                            'refer to the Amber Manual https://ambermd.org/doc12/Amber25.pdf.')
-
         group.addParam('simRestraint', params.BooleanParam, default=False,
                        label='Add restrains',
                        help='Restraining specified atoms in Cartesian space using a harmonic potential')
@@ -234,6 +216,16 @@ class AmberMDSimulation(EMProtocol):
         group.addParam('simInsertStep', params.StringParam, default='',
                        label='Insert Simulation step number: ',
                        help='Insert the defined Simulation step into the workflow on the defined position (number).\n'
+                            'The default (when empty) is the last position')
+
+        group = form.addGroup('Custom input', expertLevel=params.LEVEL_ADVANCED)
+        group.addParam('customIn', params.TextParam, width=60, default=None,
+                       label='Input sander/pmemd', expertLevel=params.LEVEL_ADVANCED,
+                       help=f'Upload a custom configuration file a sander/pmemd MD step.\n'
+                            'For detailed syntax and options, refer to the Amber Manual https://ambermd.org/doc12/Amber25.pdf.')
+        group.addParam('customInsertStep', params.StringParam, default='',
+                       label='Insert Simulation step number: ',
+                       help='Insert the custom step into the workflow on the defined position (number).\n'
                             'The default (when empty) is the last position')
 
         group = form.addGroup('Summary')
@@ -255,21 +247,26 @@ class AmberMDSimulation(EMProtocol):
         form.addSection('Recommended workflows')
         group = form.addGroup('Protein')
         group.addParam('proteinDefault', params.LabelParam, label='Protein default workflow',
-                       help='Click the wizard to set a simluation with default params for a Protein system')
+                       help='Click the wizard to set a simluation with default params for a Protein system'
+                            'Summary of steps is updated')
         group = form.addGroup('Protein+Ligand')
         group.addParam('protLigDefault', params.LabelParam, label='Protein+Ligand default workflow',
-                       help='Click the wizard to set a simluation with default params for a Protein system')
+                       help='Click the wizard to set a simluation with default params for a Protein system'
+                            'Summary of steps is updated')
         group = form.addGroup('Transmembrane protein')
         group.addParam('membraneDefault', params.LabelParam, label='Transmembrane default workflow',
-                       help='Click the wizard to set a simluation with default params for a Protein system')
+                       help='Click the wizard to set a simluation with default params for a Protein system'
+                            'Summary of steps is updated')
         group = form.addGroup('Transmembrane protein+Ligand')
         group.addParam('memLigDefault', params.LabelParam, label='Transmembrane+Ligand default workflow',
-                       help='Click the wizard to set a simluation with default params for a Protein system')
+                       help='Click the wizard to set a simluation with default params for a Protein system'
+                            'Summary of steps is updated')
 
 
     # --------------------------- STEPS functions ------------------------------
 
     def _insertAllSteps(self):
+        print('Printing each step specific params:')
         print(self.workFlowSteps.get())
         self.createGUISummary()
         i = 1
@@ -295,13 +292,11 @@ class AmberMDSimulation(EMProtocol):
         mFF, wFF = self.getFFFiles()
 
         outSystem = AmberSystem(filename=oriSystemFile, ff=mFF, wff=wFF)
-
         outSystem.setTopologyFile(localTopFile)
+        outSystem.setCrdFile(localCrdFile)
 
         outputTrajectory = self._getPath('outputTrajectory.netcdf')
-
         concatTrjFile = self.concatSimTrj()
-        ############### gestionar las trayectorias - concatenar???
         shutil.copyfile(concatTrjFile, outputTrajectory)
         outSystem.setTrajectoryFile(outputTrajectory)
 
@@ -348,11 +343,18 @@ class AmberMDSimulation(EMProtocol):
                 if msjDic.get('Restraint'):
                     lineText += f", restraint on {msjDic.get('RestrAtoms')}"
 
-            else:  # Simulation
+            elif stepType == 'Simulation':  # Simulation
                 nTime = msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.002)
                 lineText += f"Sim. time: {nTime} ps, {msjDic.get('EnsemType', 'NPT')} ensemble, {lastTemp} K"
                 if msjDic.get('Restraint'):
                     lineText += f", restraint on {msjDic.get('RestrAtoms')}"
+
+            elif stepType == 'Custom':
+                # Show the first non-empty line of the .in file as a hint
+                firstLine = next(
+                    (l.strip() for l in msjDic.get('In', '').splitlines() if l.strip()), 'custom input'
+                )
+                lineText += f'Custom input: "{firstLine}"'
 
             sumStr += lineText + '\n'
         return sumStr
@@ -382,6 +384,7 @@ class AmberMDSimulation(EMProtocol):
         """Return {cleanParamName: value} for parameters belonging to the given stage type."""
         prefix = self._key_map.get(stageType, '')
         paramsDic = {}
+        paramsDic['stepType'] = stageType
         for paramName, param in self._definition.iterAllParams():
             if paramName in self._omitParamNames:
                 continue
@@ -393,11 +396,12 @@ class AmberMDSimulation(EMProtocol):
                     paramsDic[cleanName] = self.getEnumText(paramName)
                 else:
                     paramsDic[cleanName] = getattr(self, paramName).get()
-        paramsDic['stepType'] = stageType
         return paramsDic
 
     def addDefaultForMissing(self, msjDic):
         """Add default values for any parameters missing from msjDic."""
+        if msjDic.get('stepType') == 'Custom':
+            return msjDic
         for paramName, param in self._definition.iterAllParams():
             if paramName in self._omitParamNames:
                 continue
@@ -433,6 +437,9 @@ class AmberMDSimulation(EMProtocol):
         mdpFile = os.path.join(stageDir, '{}_{}.in'.format(i, stepType))
 
         params = ''
+        if stepType == 'Custom':
+            params = msjDic['In'].rstrip() + '\n'
+
         if stepType == 'Minimization':
             params = 'MINIMIZATION\n&cntrl \n' \
                      'imin=1, ntx=1, irest=0, maxcyc={}, ncyc={}, ntpr=100,' \
@@ -441,11 +448,11 @@ class AmberMDSimulation(EMProtocol):
                 params += ", ntr=1, restraint_wt={}, restraintmask='{}' /".format(msjDic['RestrForce'],
                                                                                   RESTRAINS_DIC[msjDic['RestrAtoms']])
 
-        if stepType == 'Heating':
+        elif stepType == 'Heating':
             params = 'HEATING\n&cntrl \n' \
                      'imin=0, nstlim={}, dt={}, ntf=2, ntc=2, tempi={}, ' \
                      'temp0={}, ntpr={} , ntwx={}, ntb=1, ntp=0, ig=-1, ' \
-                     'cut=8.0 /'.format(msjDic['MDSteps'],
+                     'cut=8.0 '.format(msjDic['MDSteps'],
                                         msjDic['TimeStep'],
                                         msjDic['InTemp'],
                                         msjDic['FiTemp'],
@@ -453,16 +460,16 @@ class AmberMDSimulation(EMProtocol):
                                         msjDic['Traj'])
             params += self.addThermostatParams(msjDic)
             if msjDic['Restraint']:
-                params += ", ntr=1, restraint_wt={}, restraintmask='{}' /".format(msjDic['RestrForce'],
+                params += ", ntr=1, restraint_wt={}, restraintmask='{}' ".format(msjDic['RestrForce'],
                                                                                   RESTRAINS_DIC[msjDic['RestrAtoms']])
 
-            params += '\n&wt type=\'TEMP0\', istep1=0, istep2={}, value1={}, value2={} /\n'.format(
+            params += '/\n&wt type=\'TEMP0\', istep1=0, istep2={}, value1={}, value2={} /\n'.format(
                 msjDic['MDSteps'],
                 msjDic['InTemp'],
                 msjDic['FiTemp'],
                 msjDic['FiTemp'])
 
-        if stepType == 'Simulation':
+        elif stepType == 'Simulation':
             params = 'MD SIMULATION\n&cntrl \n' \
                      'imin=0, ntx=5, irest=1, nstlim={}, dt={}, ntf=2, ntc=2, ' \
                      'temp0={}, ntpr={} , ntwx={}, ig=-1, ' \
@@ -475,10 +482,11 @@ class AmberMDSimulation(EMProtocol):
             if msjDic['EnsemType']== 'NPT':
                 params += self.addBarostatParams(msjDic)
             if msjDic['Restraint']:
-                params += ", ntr=1, restraint_wt={}, restraintmask='{}' /".format(msjDic['simRestrForce'],
+                params += ", ntr=1, restraint_wt={}, restraintmask='{}' /".format(msjDic['RestrForce'],
                                                                                   RESTRAINS_DIC[msjDic['RestrAtoms']])
 
-        params += '\n&end \nEND'
+        if stepType != 'Custom':
+            params += '\n&end \nEND'
         with open(mdpFile, 'w') as f:
             f.write(params)
 
@@ -514,6 +522,7 @@ class AmberMDSimulation(EMProtocol):
 
     def addBarostatParams(self, msjDic):
         params = []
+        extraMembParams = ""
 
         if msjDic['EnsemType'] == 'NPT':
             pres0 = msjDic['Pressure']
@@ -527,7 +536,9 @@ class AmberMDSimulation(EMProtocol):
             elif pressScaParam == 'anisotropic':
                 ntp = 2
             elif pressScaParam == 'semiisotropic':
+                # used for membranes
                 ntp = 3
+                extraMembParams = ", csurften=3, gamma_ten=0.0"
             else:
                 ntp = 0
 
@@ -539,7 +550,7 @@ class AmberMDSimulation(EMProtocol):
                 barostat = 0
 
             params.append(
-                f"\nntb={ntb}, ntp={ntp}, pres0={pres0}, barostat={barostat}"
+                f"\nntb={ntb}, ntp={ntp}, pres0={pres0}, barostat={barostat}{extraMembParams}"
             )
 
         else:
@@ -573,6 +584,12 @@ class AmberMDSimulation(EMProtocol):
             command = '-i {} -c {} -p {} -ref {} -r {}.ncrst' \
                       ' -o {}.o' \
                       ' -x {}.netcdf -inf {}.inf'.format(inputFile, crdFile, topFile, crdFile, *[stage] * 5)
+
+        elif stageType == 'Custom':
+            # The .in content determines what sander/pmemd actually runs;
+            # -x is included so trajectory is captured if the step produces dynamics.
+            command = f'-i {inputFile} -c {crdFile} -p {topFile} -ref {crdFile} -r {stage}.ncrst -o {stage}.o -inf {stage}.inf' \
+                      f' -x {stage}.netcdf'
 
         if self.useGpu.get():
             os.environ["CUDA_VISIBLE_DEVICES"] = self.gpuList.get()
@@ -639,46 +656,34 @@ class AmberMDSimulation(EMProtocol):
         return os.path.abspath(stageDirs[0])
 
     def concatSimTrj(self):
-        """Concatenate all .netcdf trajectory files from Simulation stages using cpptraj"""
-        pattern = self._getExtraPath('*_Simulation')
-        simDirs = glob.glob(pattern)
-
+        """Concatenate all .netcdf trajectory files from Simulation/Custom stages using cpptraj."""
+        simDirs = natural_sort(glob.glob(self._getExtraPath('*_Simulation')) +
+                               glob.glob(self._getExtraPath('*_Custom')))
         if not simDirs:
-            print("Warning: No Simulation directories found")
+            print("Warning: No Simulation/Custom directories found")
             return None
 
-        simDirs = natural_sort(simDirs)
-
-        # Collect all .netcdf files from Simulation stages
-        trjFiles = []
-        for sDir in simDirs:
-            for file in os.listdir(sDir):
-                if file.endswith('.netcdf'):
-                    trjFiles.append(os.path.abspath(os.path.join(sDir, file)))
-
+        trjFiles = [
+            os.path.abspath(os.path.join(d, f))
+            for d in simDirs
+            for f in os.listdir(d) if f.endswith('.netcdf')
+        ]
         if not trjFiles:
-            print("Warning: No .netcdf trajectory files found in Simulation stages")
+            print("Warning: No .netcdf files found")
             return None
-
         if len(trjFiles) == 1:
-            # Only one trajectory, no need to concatenate
-            print("Only one Simulation trajectory found, skipping concatenation")
             return trjFiles[0]
 
         outputTrj = os.path.abspath(self._getExtraPath('concatSimulation.nc'))
-        topFile = self.amberSystem.get().getTopologyFile()
-
-        # command for cpptraj
-        command = '-p {} -y {} -x {}'.format(topFile, ' '.join(trjFiles), outputTrj)
-
-        amberPlugin.runAmbertools(self, 'cpptraj', command, cwd=self._getExtraPath())
+        topFile   = self.amberSystem.get().getTopologyFile()
+        cmd = f'-p {topFile} -y {" ".join(trjFiles)} -x {outputTrj}'
+        amberPlugin.runAmbertools(self, 'cpptraj', cmd, cwd=self._getExtraPath())
 
         if os.path.exists(outputTrj):
-            print(f"Successfully concatenated {len(trjFiles)} trajectory files")
+            print(f"Successfully concatenated {len(trjFiles)} trajectory files: {' '.join(trjFiles)}")
             return outputTrj
-        else:
-            print("Error: Concatenation failed, output file not created")
-            return None
+        print("Error: Concatenation failed")
+        return None
 
 
     def getLastHeatingTemp(self):
