@@ -195,7 +195,8 @@ class AmberMDSimulation(EMProtocol):
 
         line = group.addLine('Pressure control: ', condition='simEnsemType==1',
                              help='Pressure during the simulation (bar)\nBarostat type\n'
-                                  'Relaxation time constant for barostat (ps)')
+                                  'Pressure scaling: Recomemded Isotropic in all cases but membrane'
+                                  'systems, where semiisotropic is recommended.')
         line.addParam('simPressure', params.FloatParam, default=1.0, condition='simEnsemType==1',
                       label='Pressure (bar): ')
         line.addParam('simBarostat', params.EnumParam, default=1, condition='simEnsemType==1',
@@ -567,9 +568,6 @@ class AmberMDSimulation(EMProtocol):
         stageType = stage.split('_')[1]
         stageNum = stage.split('_')[0]
         outFile = os.path.join(stage, '{}.o'.format(stage, type))
-
-        if os.path.exists(outFile):
-            return topFile
         crdFile, topFile, _ = self.getPrevFinishedStageFiles(stageNum)
 
         if stageType == 'Minimization':

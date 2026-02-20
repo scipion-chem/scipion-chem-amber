@@ -283,10 +283,13 @@ class AmberSystemPrep(EMProtocol):
         amber.Plugin.runAmbertools(self, 'pdb4amber', params, cwd=self.getTargetFileDir())
 
     def tleapStep(self):
-        inputStructure = self.findFile(self.getTargetFileDir(), '_amber.pdb')
-        systemBasename = os.path.basename(inputStructure.split(".")[0])
         hasLigand = (self.inputFrom.get() == LIGAND)
         hasMembrane = self.tMem
+
+        if hasMembrane:
+            inputStructure = self.findFile(self.getTargetFileDir(), '_bilayer_aligned.pdb')
+        else:
+            inputStructure = self.findFile(self.getTargetFileDir(), '_amber.pdb')
 
         if self.inputFrom.get() == LIGAND:
             targetBasename = os.path.basename(self.findFile(self.getLigandFileDir(), '.sdf').split(".")[0])
@@ -316,7 +319,7 @@ class AmberSystemPrep(EMProtocol):
                 cmdsTleap.append(f"bond PROT.{first}.SG PROT.{second}.SG")
 
         # ligand
-        if hasLigand:
+        if hasLigand and not hasMembrane:
             cmdsTleap.append(f"loadoff {self.findFile(self.getLigandFileDir(), '.lib')}")
             cmdsTleap.append(f"LIG = loadmol2 {self.findFile(self.getLigandFileDir(), '.mol2')}")
             components.append('LIG')
@@ -324,9 +327,14 @@ class AmberSystemPrep(EMProtocol):
 
         # membrane
         if hasMembrane:
-            memStructure = self.findFile(self.getTargetFileDir(), "_bilayer_aligned.pdb")
+            memStructure = self.findFile(self.getTargetFileDir(), "membrane.pdb")
             cmdsTleap.append(f"MEMB = loadPdb {memStructure}")
             components.append('MEMB')
+            if hasLigand:
+                cmdsTleap.append(f"loadoff {self.findFile(self.getLigandFileDir(), '.lib')}")
+                cmdsTleap.append(f"LIG = loadmol2 {self.findFile(self.getLigandFileDir(), '_aligned.mol2')}")
+                components.append('LIG')
+                cmdsTleap.append(f"loadamberparams {self.findFile(self.getLigandFileDir(), '.frcmod')}")
 
         if len(components) == 1:
             cmdsTleap.append('SYSTEM = PROT')
@@ -391,13 +399,24 @@ class AmberSystemPrep(EMProtocol):
         print(f"Membrane box extracted: {x:.3f} {y:.3f} {z:.3f}")
         self._memBox = (x, y, z)
 
-        # align the membrane to the input pdb to keep the coordinates
-        memOutputAligned = (os.path.join(self.getTargetFileDir(), f'{systemBasename}_bilayer_aligned.pdb'))
+        # align the protein to the membrane system
+        proteinOutputAligned = os.path.join(self.getTargetFileDir(), f'{systemBasename}_bilayer_aligned.pdb')
+
         scriptParams = (
             f"-i {inputStructure} "
             f"-m {memOutput} "
-            f"-o {memOutputAligned}"
+            f"-o {proteinOutputAligned}"
         )
+        if self.inputLigand:
+            molFile = self.findFile(self.getLigandFileDir(), '.mol2')
+            if molFile and os.path.isfile(molFile):
+                # Add ligand parameters to script
+                ligandBasename = os.path.basename(molFile).split('.')[0]
+                ligandOutputAligned = os.path.join(self.getLigandFileDir(),
+                                                   f'{ligandBasename}_aligned.mol2')
+                scriptParams += (f" -l {molFile} --ligand-out {ligandOutputAligned}")
+                print(f"Ligand file found and will be aligned: {molFile}")
+
         amberPlugin.runScript(self, 'alignMembrane.py', args=scriptParams, env=AMBER_DIC,
                               cwd=self.getTargetFileDir())
 
