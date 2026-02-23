@@ -297,7 +297,7 @@ class AmberMDSimulation(EMProtocol):
         outSystem.setCrdFile(localCrdFile)
 
         outputTrajectory = self._getPath('outputTrajectory.netcdf')
-        concatTrjFile = self.concatSimTrj()
+        concatTrjFile = self.prepareSimTrj()
         shutil.copyfile(concatTrjFile, outputTrajectory)
         outSystem.setTrajectoryFile(outputTrajectory)
 
@@ -653,8 +653,9 @@ class AmberMDSimulation(EMProtocol):
 
         return os.path.abspath(stageDirs[0])
 
-    def concatSimTrj(self):
-        """Concatenate all .netcdf trajectory files from Simulation/Custom stages using cpptraj."""
+    def prepareSimTrj(self):
+        """Concatenate all .netcdf trajectory files from Simulation/Custom stages using cpptraj and wrap atoms
+        for visualization"""
         simDirs = natural_sort(glob.glob(self._getExtraPath('*_Simulation')) +
                                glob.glob(self._getExtraPath('*_Custom')))
         if not simDirs:
@@ -669,12 +670,18 @@ class AmberMDSimulation(EMProtocol):
         if not trjFiles:
             print("Warning: No .netcdf files found")
             return None
-        if len(trjFiles) == 1:
-            return trjFiles[0]
 
-        outputTrj = os.path.abspath(self._getExtraPath('concatSimulation.nc'))
+
+        outputTrj = os.path.abspath(self._getExtraPath('prepSimulation.nc'))
         topFile   = self.amberSystem.get().getTopologyFile()
-        cmd = f'-p {topFile} -y {" ".join(trjFiles)} -x {outputTrj}'
+        cpptrajInParams = ['autoimage']
+        cpptrajInParams.append(f"trajout {outputTrj}")
+        cpptrajInParams.append("run")
+        cpptrajInPath = os.path.abspath(self._getExtraPath('cpptraj.in'))
+        with open(cpptrajInPath, 'w') as f:
+            f.write("\n".join(cpptrajInParams))
+
+        cmd = f'-p {topFile} -y {" ".join(trjFiles)} -i {cpptrajInPath}'
         amberPlugin.runAmbertools(self, 'cpptraj', cmd, cwd=self._getExtraPath())
 
         if os.path.exists(outputTrj):
@@ -682,7 +689,6 @@ class AmberMDSimulation(EMProtocol):
             return outputTrj
         print("Error: Concatenation failed")
         return None
-
 
     def getLastHeatingTemp(self):
         """Get the final temperature from the last Heating step in the workflow"""
