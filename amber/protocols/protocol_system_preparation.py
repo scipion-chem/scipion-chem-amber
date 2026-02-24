@@ -388,6 +388,8 @@ class AmberSystemPrep(EMProtocol):
         elif self.getEnumText('memPosition') == 'PPM':
             params += ' --ppm'
 
+        params += ' 2>&1'
+
         amber.Plugin.runAmbertools(self, 'packmol-memgen ', params, cwd=self.getTargetFileDir())
 
         logFile = os.path.join(self.getTargetFileDir(), "packmol-memgen.log")
