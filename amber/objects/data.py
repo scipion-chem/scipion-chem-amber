@@ -31,6 +31,7 @@ import pwem.objects.data as data
 import pyworkflow.object as pwobj
 from pwchem.objects import MDSystem
 
+
 class AmberSystem(MDSystem):
     """A system atom structure (prepared for MD) in the file format of AMBER
    crd : cordinate file .crd
@@ -41,12 +42,7 @@ class AmberSystem(MDSystem):
     def __init__(self, filename=None, **kwargs):
         super().__init__(filename=filename, **kwargs)
         self._libFile = pwobj.String(kwargs.get('libFile', None))
-        self._originFile = pwobj.String(kwargs.get('originFile', None))
-        self._missingFile = pwobj.String(kwargs.get('missingFile', None))
-        self._topoFile = pwobj.String(kwargs.get('topoFile', None))
         self._crdFile = pwobj.String(kwargs.get('crdFile', None))
-        self._repFile = pwobj.String(kwargs.get('repFile', None))
-
         self._nFrames = pwobj.Integer(kwargs.get('nFrames', None))
         self._nTime = pwobj.Float(kwargs.get('nTime', None))
 

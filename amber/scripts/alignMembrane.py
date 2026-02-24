@@ -299,7 +299,6 @@ print("Reading reference membrane system from:", membrane_file)
 print()
 
 # Get protein coordinates
-# P = target (membrane system), Q = mobile (your protein)
 target_coords = get_protein_coords(membrane_file, args.use_all_atoms)
 mobile_coords = get_protein_coords(protein_file, args.use_all_atoms)
 

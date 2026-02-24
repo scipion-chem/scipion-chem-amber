@@ -66,31 +66,31 @@ class AmberAddElementSummaryWizard(VariableWizard):
 
         elif numSteps >= index > 0:
             workSteps = getattr(protocol, outputParam[0]).get().split('\n')
-            workSteps.insert(index-1, str(msjDic))
+            workSteps.insert(index - 1, str(msjDic))
             form.setVar(outputParam[0], '\n'.join(workSteps))
 
             newSum = protocol.createSummary()
             form.setVar(outputParam[1], newSum)
 
 AmberAddElementSummaryWizard().addTarget(protocol=AmberMDSimulation,
-                                  targets=['minInsertStep'],
-                                  inputs=['minInsertStep'],
-                                  outputs=['workFlowSteps', 'summarySteps'])
+                                         targets=['minInsertStep'],
+                                         inputs=['minInsertStep'],
+                                         outputs=['workFlowSteps', 'summarySteps'])
 
 AmberAddElementSummaryWizard().addTarget(protocol=AmberMDSimulation,
-                                  targets=['heatInsertStep'],
-                                  inputs=['heatInsertStep'],
-                                  outputs=['workFlowSteps', 'summarySteps'])
+                                         targets=['heatInsertStep'],
+                                         inputs=['heatInsertStep'],
+                                         outputs=['workFlowSteps', 'summarySteps'])
 
 AmberAddElementSummaryWizard().addTarget(protocol=AmberMDSimulation,
-                                  targets=['simInsertStep'],
-                                  inputs=['simInsertStep'],
-                                  outputs=['workFlowSteps', 'summarySteps'])
+                                         targets=['simInsertStep'],
+                                         inputs=['simInsertStep'],
+                                         outputs=['workFlowSteps', 'summarySteps'])
 
 AmberAddElementSummaryWizard().addTarget(protocol=AmberMDSimulation,
-                                  targets=['customInsertStep'],
-                                  inputs=['customInsertStep'],
-                                  outputs=['workFlowSteps', 'summarySteps'])
+                                         targets=['customInsertStep'],
+                                         inputs=['customInsertStep'],
+                                         outputs=['workFlowSteps', 'summarySteps'])
 
 DeleteElementWizard().addTarget(protocol=AmberMDSimulation,
                                 targets=['deleteStep'],
@@ -131,21 +131,21 @@ class AmberAddDefaultWorkflow(VariableWizard):
         form.setVar(outputParam[1], newSum)
 
 AmberAddDefaultWorkflow().addTarget(protocol=AmberMDSimulation,
-                                  targets=['proteinDefault'],
-                                  inputs=[''],
-                                  outputs=['workFlowSteps', 'summarySteps'])
+                                    targets=['proteinDefault'],
+                                    inputs=[''],
+                                    outputs=['workFlowSteps', 'summarySteps'])
 
 AmberAddDefaultWorkflow().addTarget(protocol=AmberMDSimulation,
-                                  targets=['protLigDefault'],
-                                  inputs=[''],
-                                  outputs=['workFlowSteps', 'summarySteps'])
+                                    targets=['protLigDefault'],
+                                    inputs=[''],
+                                    outputs=['workFlowSteps', 'summarySteps'])
 
 AmberAddDefaultWorkflow().addTarget(protocol=AmberMDSimulation,
-                                  targets=['membraneDefault'],
-                                  inputs=[''],
-                                  outputs=['workFlowSteps', 'summarySteps'])
+                                    targets=['membraneDefault'],
+                                    inputs=[''],
+                                    outputs=['workFlowSteps', 'summarySteps'])
 
 AmberAddDefaultWorkflow().addTarget(protocol=AmberMDSimulation,
-                                  targets=['memLigDefault'],
-                                  inputs=[''],
-                                  outputs=['workFlowSteps', 'summarySteps'])
+                                    targets=['memLigDefault'],
+                                    inputs=[''],
+                                    outputs=['workFlowSteps', 'summarySteps'])

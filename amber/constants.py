@@ -42,7 +42,8 @@ PROTEIN_RES = "ALA,ARG,ASN,ASP,CYS,GLN,GLU,GLY,HIS,ILE,LEU,LYS,MET,PHE,PRO,SER,T
 ENV_RES = "WAT,HOH,TIP3,SPC,SPCE,Na+,Cl-,K+,Cs+,Rb+,Li+,Mg+,Ca2+,Zn2+"
 RESTRAINS_DIC = {'Protein+Ligand': f':{PROTEIN_RES},LIG & !@H=', 'Protein only': f':{PROTEIN_RES} & !@H=',
                  'Ligand': ':LIG', 'Ligand+Backbone': ':LIG | @CA,C,N,O',
-                 'Backbone': '@CA,C,N,O', 'CA': '@CA', 'Ligand+CA': ':LIG  | @CA', 'Everything except wat+ions': '!(:WAT,HOH,TIP3,Na+,Cl-,K+)'}
+                 'Backbone': '@CA,C,N,O', 'CA': '@CA', 'Ligand+CA': ':LIG  | @CA',
+                 'Everything except wat+ions': '!(:WAT,HOH,TIP3,Na+,Cl-,K+)'}
 
 # Default workflows for different system types
 # Protein workflow

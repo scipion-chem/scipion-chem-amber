@@ -123,19 +123,19 @@ class AmberMDSimulation(EMProtocol):
                                   'Time step in ps. (Number of MD steps * Time step = run length in ps)'
                                   'Trajectory step size: The trajectory coordinates are written to a traj file every x steps.')
         line.addParam('heatMDSteps', params.IntParam, default=10000,
-                       label='Number of MD steps:',
-                       help='Number of MD steps in run (x * time step = run length in ps)')
+                      label='Number of MD steps:',
+                      help='Number of MD steps in run (x * time step = run length in ps)')
         line.addParam('heatTimeStep', params.FloatParam, default=0.002,
-                       label='Time step (ps)')
+                      label='Time step (ps)')
         line.addParam('heatTraj', params.IntParam, default=1000,
-                       label='Trajectory step size', help='The coordinates are written to a mdcrd file x times.')
+                      label='Trajectory step size', help='The coordinates are written to a mdcrd file x times.')
 
         line = group.addLine('Temperature increase: ',
                              help='Initial and final temperature (K)')
         line.addParam('heatInTemp', params.FloatParam, default=0,
-                       label='Initial temperature (K)')
+                      label='Initial temperature (K)')
         line.addParam('heatFiTemp', params.FloatParam, default=300,
-                       label='Final temperature (K)')
+                      label='Final temperature (K)')
 
         line = group.addLine('Heating temperature control: ',
                              help='Thermostat type and associated parameters')
@@ -152,11 +152,11 @@ class AmberMDSimulation(EMProtocol):
                        label='Add restrains',
                        help='Restraining specified atoms in Cartesian space using a harmonic potential')
         line = group.addLine('Restrains in heating: ', condition='heatRestraint',
-                                 help="Specify the components of the system to be restraint and the associated force constant.")
+                             help="Specify the components of the system to be restraint and the associated force constant.")
         line.addParam('heatRestrAtoms', params.EnumParam, default=3, choices=self._restrained_groups,
-                          label='Atoms to restrain')
+                      label='Atoms to restrain')
         line.addParam('heatRestrForce', params.FloatParam, default=50.0,
-                          label='Force (kcal·mol-1·Å-2)')
+                      label='Force (kcal·mol-1·Å-2)')
 
         group.addParam('heatInsertStep', params.StringParam, default='',
                        label='Insert Heating step number: ',
@@ -263,7 +263,6 @@ class AmberMDSimulation(EMProtocol):
                        help='Click the wizard to set a simluation with default params for a Protein system'
                             'Summary of steps is updated')
 
-
     # --------------------------- STEPS functions ------------------------------
 
     def _insertAllSteps(self):
@@ -288,7 +287,6 @@ class AmberMDSimulation(EMProtocol):
 
         localCrdFile, localTopFile = self._getPath('outputSystem.rst7'), self._getPath('systemTopology.parm7')
         shutil.copyfile(lastCrdFile, localCrdFile), shutil.copyfile(lastTopoFile, localTopFile)
-        # outTrj = self.concatTrjFiles(outTrj='outputTrajectory.xtc', tprFile=lastTprFile)
 
         mFF, wFF = self.getFFFiles()
 
@@ -454,15 +452,15 @@ class AmberMDSimulation(EMProtocol):
                      'imin=0, nstlim={}, dt={}, ntf=2, ntc=2, tempi={}, ' \
                      'temp0={}, ntpr={} , ntwx={}, ntb=1, ntp=0, ig=-1, ' \
                      'cut=8.0 '.format(msjDic['MDSteps'],
-                                        msjDic['TimeStep'],
-                                        msjDic['InTemp'],
-                                        msjDic['FiTemp'],
-                                        msjDic['Traj'],
-                                        msjDic['Traj'])
+                                       msjDic['TimeStep'],
+                                       msjDic['InTemp'],
+                                       msjDic['FiTemp'],
+                                       msjDic['Traj'],
+                                       msjDic['Traj'])
             params += self.addThermostatParams(msjDic)
             if msjDic['Restraint']:
                 params += ", ntr=1, restraint_wt={}, restraintmask='{}' ".format(msjDic['RestrForce'],
-                                                                                  RESTRAINS_DIC[msjDic['RestrAtoms']])
+                                                                                 RESTRAINS_DIC[msjDic['RestrAtoms']])
 
             params += '/\n&wt type=\'TEMP0\', istep1=0, istep2={}, value1={}, value2={} /\n'.format(
                 msjDic['MDSteps'],
@@ -480,7 +478,7 @@ class AmberMDSimulation(EMProtocol):
                                       msjDic['TrajStep'],
                                       msjDic['TrajStep'])
             params += self.addThermostatParams(msjDic)
-            if msjDic['EnsemType']== 'NPT':
+            if msjDic['EnsemType'] == 'NPT':
                 params += self.addBarostatParams(msjDic)
             if msjDic['Restraint']:
                 params += ", ntr=1, restraint_wt={}, restraintmask='{}' /".format(msjDic['RestrForce'],
@@ -585,7 +583,6 @@ class AmberMDSimulation(EMProtocol):
 
         elif stageType == 'Custom':
             # The .in content determines what sander/pmemd actually runs;
-            # -x is included so trajectory is captured if the step produces dynamics.
             command = f'-i {inputFile} -c {crdFile} -p {topFile} -ref {crdFile} -r {stage}.ncrst -o {stage}.o -inf {stage}.inf' \
                       f' -x {stage}.netcdf'
 
@@ -631,8 +628,7 @@ class AmberMDSimulation(EMProtocol):
         return system.getForceField(), system.getWaterForceField()
 
     def getStageDir(self, stage):
-        """ Returns the directory path for a given stage number.
-        """
+        """Returns the directory path for a given stage number"""
         pattern = self._getExtraPath('{}*'.format(stage))
         matchingDirs = glob.glob(pattern)
 
@@ -643,7 +639,7 @@ class AmberMDSimulation(EMProtocol):
         return None
 
     def getLastStageDir(self):
-        """ Returns the directory path of the stage with the highest number. """
+        """Returns the directory path of the stage with the highest number"""
         pattern = self._getExtraPath('*_*')
         allDirs = glob.glob(pattern)
 
@@ -671,9 +667,8 @@ class AmberMDSimulation(EMProtocol):
             print("Warning: No .netcdf files found")
             return None
 
-
         outputTrj = os.path.abspath(self._getExtraPath('prepSimulation.nc'))
-        topFile   = self.amberSystem.get().getTopologyFile()
+        topFile = self.amberSystem.get().getTopologyFile()
         cpptrajInParams = ['autoimage']
         cpptrajInParams.append(f"trajout {outputTrj}")
         cpptrajInParams.append("run")
@@ -696,7 +691,6 @@ class AmberMDSimulation(EMProtocol):
         lines = workSteps.split('\n')
         lastHeatingTemp = 300  # Default
 
-        # Search for the last Heating step and get its FiTemp
         for dicLine in reversed(lines):
             if dicLine.strip() == '':
                 continue
