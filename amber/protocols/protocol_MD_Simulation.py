@@ -294,7 +294,7 @@ class AmberMDSimulation(EMProtocol):
         outSystem.setTopologyFile(localTopFile)
         outSystem.setCrdFile(localCrdFile)
 
-        outputTrajectory = self._getPath('outputTrajectory.netcdf')
+        outputTrajectory = self._getPath('outputTrajectory.nc')
         concatTrjFile = self.prepareSimTrj()
         shutil.copyfile(concatTrjFile, outputTrajectory)
         outSystem.setTrajectoryFile(outputTrajectory)
