@@ -245,7 +245,7 @@ class AmberMDSimulation(EMProtocol):
         #                                you may want to delete the previous unchanged step)''')
         group.addParam('workFlowSteps', params.TextParam, label='User transparent', condition='False')
 
-        form.addSection('Recommended workflows')
+        form.addSection('Example workflows')
         group = form.addGroup('Protein')
         group.addParam('proteinDefault', params.LabelParam, label='Protein default workflow',
                        help='Click the wizard to set a simluation with default params for a Protein system'
@@ -290,7 +290,7 @@ class AmberMDSimulation(EMProtocol):
 
         mFF, wFF = self.getFFFiles()
 
-        outSystem = AmberSystem(filename=oriSystemFile, ff=mFF, wff=wFF)
+        outSystem = AmberSystem(filename=oriSystemFile, ff=mFF, wff=wFF, nTime=self.calculateTotalSimTime())
         outSystem.setTopologyFile(localTopFile)
         outSystem.setCrdFile(localCrdFile)
 
@@ -684,6 +684,24 @@ class AmberMDSimulation(EMProtocol):
             return outputTrj
         print("Error: Concatenation failed")
         return None
+
+    def calculateTotalSimTime(self):
+        """
+        Calculates the total simulation time (in ns) by summing
+        MDSteps * TimeStep for all production and heating stages.
+        """
+        total_ps = 0.0
+        workSteps = self.workFlowSteps.get()
+
+        for dicLine in workSteps.split('\n'):
+            if not dicLine.strip(): continue
+
+            msjDic = eval(dicLine)
+
+            if msjDic.get('stepType') in ['Simulation', 'Custom']:
+                total_ps += msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.0)
+
+        return total_ps / 1000.0
 
     def getLastHeatingTemp(self):
         """Get the final temperature from the last Heating step in the workflow"""

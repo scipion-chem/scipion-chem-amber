@@ -88,7 +88,7 @@ class AmberSystemPViewer(MDSystemPViewer):
       outTcl = os.path.join(os.path.dirname(system.getTrajectoryFile()), 'vmdSimulation.tcl')
       sysExt = os.path.splitext(system.getTopologyFile())[1][1:]
       trjExt = os.path.splitext(system.getTrajectoryFile())[1][1:]
-      self.writeTCL(outTcl, system.getTopologyFile(), sysExt, system.getTrajectoryFile(), trjExt)
+      self.writeTCL(outTcl, system.getTopologyFile(), sysExt, system.getTrajectoryFile(), 'netcdf')
 
       args = '-e {}'.format(outTcl)
       return [VmdViewPopen(args)]

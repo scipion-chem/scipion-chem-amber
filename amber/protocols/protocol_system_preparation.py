@@ -168,7 +168,7 @@ class AmberSystemPrep(EMProtocol):
                        label='Solvation box',
                        help='Both solvation boxes will be isometric')
         group.addParam('minDist', params.FloatParam, condition='tMem==False', label='Padding distance:',
-                       default=20.0, help='Minimum distance Å from the protein to the edge of the box')
+                       default=15.0, help='Minimum distance Å from the protein to the edge of the box')
         group.addParam('memDistXY', params.FloatParam, default=15.0, condition='tMem',
                        label='Min dist to XY boundary (Å):',
                        help='Minimum distance between the protein and the box boundaries in X/Y axes. ')

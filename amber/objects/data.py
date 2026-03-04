@@ -49,7 +49,7 @@ class AmberSystem(MDSystem):
     def __str__(self):
         strStr = '{} ({}'.format(self.getClassName(), os.path.basename(self.getSystemFile()))
         if self.hasTrajectory():
-            strStr += f', frames: {self._nFrames.get()}, time(ps): {self._nTime.get()}'
+            strStr += f', time(ns): {self._nTime.get()}'
         strStr += ')'
         return strStr
 
@@ -59,32 +59,8 @@ class AmberSystem(MDSystem):
     def setCrdFile(self, value):
         self._crdFile.set(value)
 
-    def getLibFile(self):
-        return self._libFile.get()
-
-    def getReportFile(self):
-        return self._repFile.get()
-
-    def setReportFile(self, value):
-        self._repFile.set(value)
-
     def getNFrames(self):
         return self._nFrames.get()
 
     def getNTime(self):
         return self._nTime.get()
-
-    def setLibFile(self, value):
-        self._libFile.set(value)
-
-    def getOriginFile(self):
-        return self._originFile.get()
-
-    def setOriginFile(self, value):
-        self._originFile.set(value)
-
-    def getMissingFile(self):
-        return self._missingFile.get()
-
-    def setMissingFile(self, value):
-        self._missingFile.set(value)
