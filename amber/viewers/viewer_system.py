@@ -26,93 +26,69 @@
 import os, glob, subprocess
 import pyworkflow.viewer as pwviewer
 from pyworkflow.protocol import params
-from pwchem.viewers import VmdViewPopen
+from pwchem.viewers import PyMolViewer, PyMolView, VmdViewPopen, MDSystemPViewer
+# from pwchem.viewers.viewers_data import PML_MD_STR
 
-
-from pwchem.viewers import PyMolViewer, PyMolView
 from pwchem.utils import natural_sort
+# from pwchem.constants import TCL_MD_STR, PML_MD_STR
 
 from amber import Plugin
 from ..objects import AmberSystem
 from ..protocols import AmberMDSimulation
 from ..constants import *
 
-
+PML_MD_STR = '''load {}
+load_traj {}, format=trj
+hide everything, not br. all within 3 of (byres polymer & name CA)
+set movie_fps, 15
+'''
 
 class AmberSystemViewer(pwviewer.Viewer):
-    _label = 'Viewer AMBER system'
-    _environments = [pwviewer.DESKTOP_TKINTER]
+  _label = 'Viewer Molecular Dynamics system'
+  _environments = [pwviewer.DESKTOP_TKINTER]
+  _targets = []
+
+  def _visualize(self, obj, onlySystem=False, trjFile=None, **kwargs):
+    systemFile = os.path.abspath(obj.getSystemFile())
+    topoFile = os.path.abspath(obj.getTopologyFile())
+    if not trjFile:
+        trjFile = obj.hasTrajectory()
+
+    if not trjFile or onlySystem:
+        pymolV = PyMolViewer(project=self.getProject())
+        return pymolV._visualize(topoFile, cwd=os.path.dirname(topoFile))
+
+    else:
+        trjFile = os.path.abspath(obj.getTrajectoryFile())
+        outPml = os.path.join(os.path.dirname(trjFile), 'pymolSimulation.pml')
+        with open(outPml, 'w') as f:
+          f.write(PML_MD_STR.format(os.path.abspath(topoFile),
+                                    os.path.abspath(trjFile)))
+
+        return [PyMolView(os.path.abspath(outPml), cwd=os.path.dirname(trjFile))]
+
+class AmberSystemPViewer(MDSystemPViewer):
+    """ Visualize the output of Molecular Dynamics simulation """
+    _label = 'Viewer Molecular Dynamics System'
     _targets = [AmberSystem]
 
-    def _visualize(self, obj, **kwargs):
-        amberFile = os.path.abspath(obj.getCheckFile())
-
-        pymolV = PyMolViewer(project=self.getProject())
-        return pymolV._visualize(amberFile, cwd=os.path.dirname(amberFile))
-
-
-class AmberMDSimulationViewer(pwviewer.ProtocolViewer):
-    ''' Visualize the trajectory output'''
-    _label = 'Viewer AMBER Simulation'
-    _targets = [AmberMDSimulation]
-    _environments = [pwviewer.DESKTOP_TKINTER]
-
-
     def __init__(self, **args):
-        super().__init__(**args)
+      super().__init__(**args)
 
     def _defineParams(self, form):
-        form.addSection(label='Visualization of AMBER Simulation')
-        group = form.addGroup('Open MD simulation')
-        group.addParam('chooseStage', params.EnumParam,
-                       choices=self._getStagesWTrj(), default=0,
-                       label='Choose the stage to analyze: ',
-                       help='Choose the simulation stage to analyze')
-        group.addParam('displayMdVMD', params.LabelParam,
-                       label='Display trajectory with VMD: ',
-                       help='Display trajectory with VMD. \n'
-                            'Protein represented as NewCartoon and waters as dots'
-                       )
+      super()._defineParams(form)
 
-    def _getVisualizeDict(self):
-        return {
-            'displayMdVMD': self._showMdVMD,
-        }
+    def _showMdPymol(self, paramName=None):
+      system = self.getMDSystem()
+      return AmberSystemViewer(project=self.getProject())._visualize(system)
 
     def _showMdVMD(self, paramName=None):
-        stage = self.getEnumText('chooseStage')
-        trjFile = self.getStageFiles(stage)
-        topFile = self.protocol.outputSystem.getTopologyFile()
+      system = self.getMDSystem()
 
-        params = 'mol addrep 0 \n' \
-                 'mol new %s type {parm7} first 0 last -1 step 1 waitfor 1 \n' \
-                 'mol addfile %s type {netcdf} first 0 last -1 step 1 waitfor 1 0' % (os.path.abspath(topFile), os.path.abspath(trjFile))
+      outTcl = os.path.join(os.path.dirname(system.getTrajectoryFile()), 'vmdSimulation.tcl')
+      sysExt = os.path.splitext(system.getTopologyFile())[1][1:]
+      trjExt = os.path.splitext(system.getTrajectoryFile())[1][1:]
+      self.writeTCL(outTcl, system.getTopologyFile(), sysExt, system.getTrajectoryFile(), 'netcdf')
 
-        outTcl = self.protocol._getExtraPath('vmdSimulation.tcl')
-        with open(outTcl, 'w') as f:
-            f.write(params)
-        args = '-e {}'.format(outTcl)
-
-        return [VmdViewPopen(args)]
-
-
-
-    ################################# UTILS #########################
-
-    def _getStagesWTrj(self):
-        '''Return stages with a saved trajectory'''
-        stages = ['All']
-        for stDir in natural_sort(glob.glob(self.protocol._getExtraPath('stage_*'))):
-            stage = os.path.basename(stDir)
-            trjFile = '{}/{}.nc'.format(stDir, stage)
-            if os.path.exists(trjFile):
-                stages.append(stage)
-        return stages
-
-    def getStageFiles(self, stage):
-        if stage == 'All':
-            trjFile = self.protocol._getPath('outputTrajectory.nc')
-        else:
-            trjFile = self.protocol._getExtraPath('{}/{}.nc'.format(stage, stage))
-
-        return trjFile
+      args = '-e {}'.format(outTcl)
+      return [VmdViewPopen(args)]

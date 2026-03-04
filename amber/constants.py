@@ -29,6 +29,51 @@ AMBER_HOME = 'AMBER_HOME'
 
 AMBER = 'amber'
 V2020 = '2020.1'
-AMBER_DEFAULT_VERSION = V2020
+V2025 = '2025.1'
+
+AMBER_DEFAULT_VERSION = V2025
 
 VMD_HOME = 'VMD_HOME'
+
+AMBER_DIC = {'name': 'amber', 'version': AMBER_DEFAULT_VERSION, 'home': 'AMBER_HOME', 'pmemd_home': 'PMEMD_HOME'}
+
+PROTEIN_RES = "ALA,ARG,ASN,ASP,CYS,GLN,GLU,GLY,HIS,ILE,LEU,LYS,MET,PHE,PRO,SER,THR,TRP,TYR,VAL," \
+              "HID,HIE,HIP,CYX,ASH,GLH,LYN,ARN,ACE,NME,NHE"
+ENV_RES = "WAT,HOH,TIP3,SPC,SPCE,Na+,Cl-,K+,Cs+,Rb+,Li+,Mg+,Ca2+,Zn2+"
+RESTRAINS_DIC = {'Protein+Ligand': f':{PROTEIN_RES},LIG & !@H=', 'Protein only': f':{PROTEIN_RES} & !@H=',
+                 'Ligand': ':LIG', 'Ligand+Backbone': ':LIG | @CA,C,N,O',
+                 'Backbone': '@CA,C,N,O', 'CA': '@CA', 'Ligand+CA': ':LIG  | @CA',
+                 'Everything except wat+ions': '!(:WAT,HOH,TIP3,Na+,Cl-,K+)'}
+
+# Default workflows for different system types
+# Protein workflow
+PROTWORK = "{'stepType': 'Minimization', 'MaxCycles': 50000, 'SdCycles': 35000, 'IntCutoff': 8.0,'Restraint': False, 'CustomIn': None, 'stepType': 'Minimization'}\n" \
+           "{'stepType': 'Heating', 'MDSteps': 20000, 'TimeStep': 0.001, 'Traj': 1000, 'InTemp': 0, 'FiTemp': 300, 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'Restraint': True, 'RestrAtoms': 'Backbone', 'RestrForce': 25.0, 'CustomIn': None, 'stepType': 'Heating'}\n" \
+           "{'stepType': 'Simulation', 'MDSteps': 10000, 'TimeStep': 0.002, 'TrajStep': 1000, 'EnsemType': 'NPT', 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'CoupConst': 2.0, 'FricConst': 2.0, 'Pressure': 1.0, 'Barostat': 'Monte Carlo', 'PressureScaling': 'isotropic', 'Restraint': True, 'RestrAtoms': 'Backbone', 'RestrForce': 0.0, 'CustomIn': None, 'stepType': 'Simulation'}\n" \
+           "{'stepType': 'Simulation', 'MDSteps': 1000000, 'TimeStep': 0.002, 'TrajStep': 10000, 'EnsemType': 'NPT', 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'CoupConst': 2.0, 'FricConst': 2.0, 'Pressure': 1.0, 'Barostat': 'Monte Carlo', 'PressureScaling': 'isotropic', 'Restraint': False, 'RestrForce': 0.0, 'CustomIn': None, 'stepType': 'Simulation'}\n"
+
+# Protein + Ligand workflow
+PROTLIGWORK = "{'stepType': 'Minimization', 'MaxCycles': 50000, 'SdCycles': 35000, 'IntCutoff': 8.0,'Restraint': False, 'CustomIn': None, 'stepType': 'Minimization'}\n" \
+              "{'stepType': 'Heating', 'MDSteps': 20000, 'TimeStep': 0.001, 'Traj': 1000, 'InTemp': 0, 'FiTemp': 300, 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'Restraint': True, 'RestrAtoms': 'Ligand+Backbone', 'RestrForce': 25.0, 'CustomIn': None, 'stepType': 'Heating'}\n" \
+              "{'stepType': 'Simulation', 'MDSteps': 10000, 'TimeStep': 0.002, 'TrajStep': 1000, 'EnsemType': 'NPT', 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'CoupConst': 2.0, 'FricConst': 2.0, 'Pressure': 1.0, 'Barostat': 'Monte Carlo', 'PressureScaling': 'isotropic', 'Restraint': True, 'RestrAtoms': 'Ligand+Backbone', 'RestrForce': 0.0, 'CustomIn': None, 'stepType': 'Simulation'}\n" \
+              "{'stepType': 'Simulation', 'MDSteps': 1000000, 'TimeStep': 0.002, 'TrajStep': 10000, 'EnsemType': 'NPT', 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'CoupConst': 2.0, 'FricConst': 2.0, 'Pressure': 1.0, 'Barostat': 'Monte Carlo', 'PressureScaling': 'isotropic', 'Restraint': False, 'RestrAtoms': 'Protein', 'RestrForce': 0.0, 'CustomIn': None, 'stepType': 'Simulation'}\n"
+
+MEMPROTWORK = "{'stepType': 'Minimization', 'MaxCycles': 2000, 'SdCycles': 2000, 'IntCutoff': 8.0, 'Restraint': True, 'RestrAtoms': 'Everything except wat+ions', 'RestrForce': 50.0, 'CustomIn': None, 'stepType': 'Minimization'}\n" \
+              "{'stepType': 'Minimization', 'MaxCycles': 10000, 'SdCycles': 5000, 'IntCutoff': 8.0, 'Restraint': True, 'RestrAtoms': 'Everything except wat+ions', 'RestrForce': 50.0, 'CustomIn': None, 'stepType': 'Minimization'}\n" \
+              "{'stepType': 'Minimization', 'MaxCycles': 100000, 'SdCycles': 90000, 'IntCutoff': 8.0, 'Restraint': True, 'RestrAtoms': 'Protein only', 'RestrForce': 50.0, 'CustomIn': None, 'stepType': 'Minimization'}\n" \
+              "{'stepType': 'Heating', 'MDSteps': 100000, 'TimeStep': 0.001, 'Traj': 1000, 'InTemp': 0.0, 'FiTemp': 100.0, 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'CoupConst': 2.0, 'FricConst': 2.0, 'CustomIn': None, 'Restraint': True, 'RestrAtoms': 'Everything except wat+ions', 'RestrForce': 50.0, 'stepType': 'Heating'}\n" \
+              "{'stepType': 'Heating', 'MDSteps': 1000000, 'TimeStep': 0.001, 'Traj': 1000, 'InTemp': 100.0, 'FiTemp': 300.0, 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'CoupConst': 2.0, 'FricConst': 2.0, 'CustomIn': None, 'Restraint': True, 'RestrAtoms': 'Protein only', 'RestrForce': 50.0, 'stepType': 'Heating'}\n" \
+              "{'stepType': 'Simulation', 'MDSteps': 100000, 'TimeStep': 0.002, 'TrajStep': 1000, 'EnsemType': 'NPT', 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'CoupConst': 2.0, 'FricConst': 2.0, 'Pressure': 1.0, 'Barostat': 'Monte Carlo', 'PressureScaling': 'isotropic', 'CustomIn': None, 'Restraint': True, 'RestrAtoms': 'Protein only', 'RestrForce': 50.0, 'stepType': 'Simulation'}\n" \
+              "{'stepType': 'Simulation', 'MDSteps': 500000, 'TimeStep': 0.002, 'TrajStep': 5000, 'EnsemType': 'NPT', 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'CoupConst': 2.0, 'FricConst': 2.0, 'Pressure': 1.0, 'Barostat': 'Monte Carlo', 'PressureScaling': 'semiisotropic', 'Restraint': True, 'RestrAtoms': 'CA', 'RestrForce': 1.0, 'CustomIn': None, 'stepType': 'Simulation'}\n" \
+              "{'stepType': 'Simulation', 'MDSteps': 50000000, 'TimeStep': 0.002, 'TrajStep': 50000, 'EnsemType': 'NPT', 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'CoupConst': 2.0, 'FricConst': 2.0, 'Pressure': 1.0, 'Barostat': 'Monte Carlo', 'PressureScaling': 'semiisotropic', 'Restraint': False, 'RestrAtoms': '', 'RestrForce': 0.0, 'CustomIn': None, 'stepType': 'Simulation'}\n" \
+              "{'stepType': 'Simulation', 'MDSteps': 125000000, 'TimeStep': 0.002 'TrajStep': 125000, 'EnsemType': 'NPT', 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'CoupConst': 2.0, 'FricConst': 2.0, 'Pressure': 1.0, 'Barostat': 'Monte Carlo', 'PressureScaling': 'semiisotropic', 'Restraint': False, 'RestrAtoms': '', 'RestrForce': 0.0, 'CustomIn': None, 'stepType': 'Simulation'}\n"
+
+MEMPROTLIGWORK = "{'stepType': 'Minimization', 'MaxCycles': 2000, 'SdCycles': 2000, 'IntCutoff': 8.0, 'Restraint': True, 'RestrAtoms': 'Everything except wat+ions', 'RestrForce': 50.0, 'CustomIn': None, 'stepType': 'Minimization'}\n" \
+                 "{'stepType': 'Minimization', 'MaxCycles': 10000, 'SdCycles': 5000, 'IntCutoff': 8.0, 'Restraint': True, 'RestrAtoms': 'Everything except wat+ions', 'RestrForce': 50.0, 'CustomIn': None, 'stepType': 'Minimization'}\n" \
+                 "{'stepType': 'Minimization', 'MaxCycles': 100000, 'SdCycles': 90000, 'IntCutoff': 8.0, 'Restraint': True, 'RestrAtoms': 'Protein+Ligand', 'RestrForce': 50.0, 'CustomIn': None, 'stepType': 'Minimization'}\n" \
+                 "{'stepType': 'Heating', 'MDSteps': 100000, 'TimeStep': 0.001, 'Traj': 1000, 'InTemp': 0.0, 'FiTemp': 100.0, 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'CoupConst': 2.0, 'FricConst': 2.0, 'CustomIn': None, 'Restraint': True, 'RestrAtoms': 'Everything except wat+ions', 'RestrForce': 50.0, 'stepType': 'Heating'}\n" \
+                 "{'stepType': 'Heating', 'MDSteps': 1000000, 'TimeStep': 0.001, 'Traj': 1000, 'InTemp': 100.0, 'FiTemp': 300.0, 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'CoupConst': 2.0, 'FricConst': 2.0, 'CustomIn': None, 'Restraint': True, 'RestrAtoms': 'Ligand+Backbone', 'RestrForce': 50.0, 'stepType': 'Heating'}\n" \
+                 "{'stepType': 'Simulation', 'MDSteps': 100000, 'TimeStep': 0.002, 'TrajStep': 1000, 'EnsemType': 'NPT', 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'CoupConst': 2.0, 'FricConst': 2.0, 'Pressure': 1.0, 'Barostat': 'Monte Carlo', 'PressureScaling': 'isotropic', 'CustomIn': None, 'Restraint': True, 'RestrAtoms': 'Ligand+Backbone', 'RestrForce': 50.0, 'stepType': 'Simulation'}\n" \
+                 "{'stepType': 'Simulation', 'MDSteps': 500000, 'TimeStep': 0.002, 'TrajStep': 5000, 'EnsemType': 'NPT', 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'CoupConst': 2.0, 'FricConst': 2.0, 'Pressure': 1.0, 'Barostat': 'Monte Carlo', 'PressureScaling': 'semiisotropic', 'Restraint': True, 'RestrAtoms': 'CA', 'RestrForce': 1.0, 'CustomIn': None, 'stepType': 'Simulation'}\n" \
+                 "{'stepType': 'Simulation', 'MDSteps': 50000000, 'TimeStep': 0.002, 'TrajStep': 50000, 'EnsemType': 'NPT', 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'CoupConst': 2.0, 'FricConst': 2.0, 'Pressure': 1.0, 'Barostat': 'Monte Carlo', 'PressureScaling': 'semiisotropic', 'Restraint': False, 'RestrAtoms': '', 'RestrForce': 0.0, 'CustomIn': None, 'stepType': 'Simulation'}\n" \
+                 "{'stepType': 'Simulation', 'MDSteps': 125000000, 'TimeStep': 0.002, 'TrajStep': 125000, 'EnsemType': 'NPT', 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'CoupConst': 2.0, 'FricConst': 2.0, 'Pressure': 1.0, 'Barostat': 'Monte Carlo', 'PressureScaling': 'semiisotropic', 'Restraint': False, 'RestrAtoms': '', 'RestrForce': 0.0, 'CustomIn': None, 'stepType': 'Simulation'}\n"

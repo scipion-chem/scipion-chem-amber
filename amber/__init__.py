@@ -24,31 +24,30 @@
 # *
 # **************************************************************************
 
+import os
 import pwem
 
 from pyworkflow import join
 
-from amber.constants import AMBER_HOME, V2020, AMBER, AMBER_DEFAULT_VERSION
+from amber.constants import *
 from pwem.convert.atom_struct import getEnviron
+
+import pwchem
+
+from scipion.install.funcs import InstallHelper
 
 _logo = "icon.png"
 _references = ['Salomon-Ferrer2013']
 
-
-class Plugin(pwem.Plugin):
-    _homeVar = AMBER_HOME
-    _pathVars = [AMBER_HOME]
-    _supportedVersions = [V2020]
-    _amberName = 'ambertools-21'
-    _pluginHome = join(pwem.Config.EM_ROOT, _amberName)
-    _Ambertools21Env = "Ambertools21"
-
+class Plugin(pwchem.Plugin):
     @classmethod
     def _defineVariables(cls):
         """ Return and write a variable in the config file.
         """
-        cls._defineEmVar(AMBER_HOME, cls._amberName)
-        cls._defineVar("AMBERTOOLS_ENV_ACTIVATION", 'conda activate %s' % cls._Ambertools21Env)
+        cls._defineEmVar(AMBER_DIC['home'], cls.getEnvName(AMBER_DIC))
+        cls._defineVar("AMBERTOOLS_ENV_ACTIVATION", 'conda activate %s' % cls.getEnvName(AMBER_DIC))
+        cls._defineEmVar(AMBER_DIC['pmemd_home'], f'pmemd24')
+
 
     @classmethod
     def getAmbertoolsEnvActivation(cls):
@@ -57,40 +56,40 @@ class Plugin(pwem.Plugin):
 
     @classmethod
     def defineBinaries(cls, env, default=False):
-        # Creating a new conda enviroment for Ambertools21
-        AMBER_INSTALLED = '%s_installed' % AMBER
-        ambertools_commands = 'conda create -y -n %s && ' % cls._Ambertools21Env
+        # Creating a new conda enviroment for Ambertools25
+        AMBER_INSTALLED = '%s_%s_installed' % (AMBER, V2025)
+        ambertools_commands = 'conda create -y -n %s && ' % cls.getEnvName(AMBER_DIC)
         ambertools_commands += '%s %s && ' % (cls.getCondaActivationCmd(), cls.getAmbertoolsEnvActivation())
-        ambertools_commands += 'conda install -y -c conda-forge ambertools=21 compilers && '
+        ambertools_commands += 'conda install -y -c dacase -c conda-forge ambertools-dac=25 compilers && '
         ambertools_commands += 'touch {}'.format(AMBER_INSTALLED)  # Flag installation finished
 
         ambertools_commands = [(ambertools_commands, AMBER_INSTALLED)]
-        env.addPackage('ambertools', version='21',
+        env.addPackage(AMBER_DIC['name'], version=AMBER_DIC['version'],
                        tar='void.tgz',
                        commands=ambertools_commands,
                        default=True)
 
-    @classmethod
-    def runAmbertools(cls, protocol, program, args, cwd=None):
-        """ Run Ambertools command from a given protocol. """
-        fullProgram = '%s %s && %s' % (cls.getCondaActivationCmd(), cls.getAmbertoolsEnvActivation(), program)
-        protocol.runJob(fullProgram, args, env=cls.getEnviron_amber(), cwd=cwd)
-
-
-    @classmethod
-    def runAmberPrintf(cls, protocol, program, printfValues, args, cwd=None):
-        """ Run Ambertools command from a given protocol. """
-        AmberPath = join(cls._pluginHome, 'bin/{}'.format(program))
-        program = 'printf "{}\n" | {}'.format('\n'.join(printfValues), AmberPath)
-        protocol.runJob(program, args, cwd=cwd)
-
-
-
-    @classmethod  # Test that
-    def getEnviron_amber(cls):
-        pass
+        installer = InstallHelper(AMBER_DIC['name'], packageHome=cls.getVar(AMBER_DIC['home']),
+                                  packageVersion=AMBER_DIC['version'])
 
     # ---------------------------------- Utils functions  -----------------------
     @classmethod
-    def runAmber(cls, self, param, params, cwd):
-        pass
+    def getPluginHome(cls, path=""):
+        import amber
+        fnDir = os.path.split(amber.__file__)[0]
+        return os.path.join(fnDir, path)
+
+    @classmethod
+    def runAmbertools(cls, protocol, program, args, cwd=None):
+        """ Run Ambertools command from a given protocol. """
+        fullProgram = f' {cls.getEnvActivationCommand(AMBER_DIC)} && {program}'
+        protocol.runJob(fullProgram, args, env=cls.getEnviron(), cwd=cwd)
+
+    @classmethod
+    def runPmemd(cls, protocol, program, args, gpu=False, cwd=None):
+        fullProgram = f' {cls.getEnvActivationCommand(AMBER_DIC)} && {cls.getPmemdBin()}'
+        protocol.runJob(fullProgram, args, env=cls.getEnviron(), cwd=cwd)
+
+    @classmethod
+    def getPmemdBin(cls, prog='pmemd.cuda '):
+        return join(cls.getVar(AMBER_DIC['pmemd_home']), 'bin', prog)

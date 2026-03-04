@@ -25,30 +25,127 @@
 # *
 # **************************************************************************
 
-"""
-This wizard will extract the chains from a atomic structure (pdb) file in
-order to select it in the protocol.
-Then, it will load the structure and will take all chain related
-information such as name and number of residues.
-"""
-
 # Imports
-from pwchem.wizards import AddElementSummaryWizard, DeleteElementWizard, WatchElementWizard
+from pwchem.wizards import DeleteElementWizard, VariableWizard, WatchElementWizard
 
 from ..protocols import AmberMDSimulation
+from ..constants import *
 
-AddElementSummaryWizard().addTarget(protocol=AmberMDSimulation,
-                             targets=['insertStep'],
-                             inputs=['insertStep'],
-                             outputs=['workFlowSteps', 'summarySteps'])
+class AmberAddElementSummaryWizard(VariableWizard):
+    """Add a step of the workflow in the defined position"""
+    _targets, _inputs, _outputs = [], {}, {}
+
+    def show(self, form, *params):
+        inputParam, outputParam = self.getInputOutput(form)
+        protocol = form.protocol
+        numSteps = protocol.countSteps()
+
+        if 'min' in form.wizParamName:
+            stageType = 'Minimization'
+        elif 'heat' in form.wizParamName:
+            stageType = 'Heating'
+        elif 'sim' in form.wizParamName:
+            stageType = 'Simulation'
+        elif 'custom' in form.wizParamName:
+            stageType = 'Custom'
+
+        if getattr(protocol, inputParam[0]).get().strip() != '':
+            index = int(getattr(protocol, inputParam[0]).get())
+        else:
+            index = numSteps + 1
+
+        msjDic = protocol.getStageParamsDic(stageType)
+
+        if index > numSteps:
+            prevStr = getattr(protocol, outputParam[0]).get() \
+                if getattr(protocol, outputParam[0]).get() is not None else ''
+            form.setVar(outputParam[0], prevStr + str(msjDic) + '\n')
+
+            newSum = protocol.createSummary()
+            form.setVar(outputParam[1], newSum)
+
+        elif numSteps >= index > 0:
+            workSteps = getattr(protocol, outputParam[0]).get().split('\n')
+            workSteps.insert(index - 1, str(msjDic))
+            form.setVar(outputParam[0], '\n'.join(workSteps))
+
+            newSum = protocol.createSummary()
+            form.setVar(outputParam[1], newSum)
+
+AmberAddElementSummaryWizard().addTarget(protocol=AmberMDSimulation,
+                                         targets=['minInsertStep'],
+                                         inputs=['minInsertStep'],
+                                         outputs=['workFlowSteps', 'summarySteps'])
+
+AmberAddElementSummaryWizard().addTarget(protocol=AmberMDSimulation,
+                                         targets=['heatInsertStep'],
+                                         inputs=['heatInsertStep'],
+                                         outputs=['workFlowSteps', 'summarySteps'])
+
+AmberAddElementSummaryWizard().addTarget(protocol=AmberMDSimulation,
+                                         targets=['simInsertStep'],
+                                         inputs=['simInsertStep'],
+                                         outputs=['workFlowSteps', 'summarySteps'])
+
+AmberAddElementSummaryWizard().addTarget(protocol=AmberMDSimulation,
+                                         targets=['customInsertStep'],
+                                         inputs=['customInsertStep'],
+                                         outputs=['workFlowSteps', 'summarySteps'])
 
 DeleteElementWizard().addTarget(protocol=AmberMDSimulation,
                                 targets=['deleteStep'],
                                 inputs=['deleteStep'],
                                 outputs=['workFlowSteps', 'summarySteps'])
 
-WatchElementWizard().addTarget(protocol=AmberMDSimulation,
-                                targets=['watchStep'],
-                                inputs=['watchStep'],
-                                outputs=['workFlowSteps', 'summarySteps'])
+# WatchElementWizard().addTarget(protocol=AmberMDSimulation,
+#                                 targets=['watchStep'],
+#                                 inputs=['watchStep'],
+#                                 outputs=['workFlowSteps', 'summarySteps'])
 
+
+class AmberAddDefaultWorkflow(VariableWizard):
+    """Add a default workflow based on system type"""
+    _targets, _inputs, _outputs = [], {}, {}
+
+    def show(self, form, *params):
+        inputParam, outputParam = self.getInputOutput(form)
+        protocol = form.protocol
+
+        # Determine workflow type from wizard parameter name
+        if 'protein' in form.wizParamName:
+            workflowSteps = PROTWORK
+        elif 'protLig' in form.wizParamName:
+            workflowSteps = PROTLIGWORK
+        elif 'memLig' in form.wizParamName:
+            workflowSteps = MEMPROTLIGWORK
+        elif 'membrane' in form.wizParamName:
+            workflowSteps = MEMPROTWORK
+        else:
+            workflowSteps = PROTWORK  # Default fallback
+
+        # Set the workflow steps
+        form.setVar(outputParam[0], workflowSteps)
+
+        # Generate and set summary using the unified function
+        newSum = protocol.createSummary(workflowSteps)
+        form.setVar(outputParam[1], newSum)
+
+AmberAddDefaultWorkflow().addTarget(protocol=AmberMDSimulation,
+                                    targets=['proteinDefault'],
+                                    inputs=[''],
+                                    outputs=['workFlowSteps', 'summarySteps'])
+
+AmberAddDefaultWorkflow().addTarget(protocol=AmberMDSimulation,
+                                    targets=['protLigDefault'],
+                                    inputs=[''],
+                                    outputs=['workFlowSteps', 'summarySteps'])
+
+AmberAddDefaultWorkflow().addTarget(protocol=AmberMDSimulation,
+                                    targets=['membraneDefault'],
+                                    inputs=[''],
+                                    outputs=['workFlowSteps', 'summarySteps'])
+
+AmberAddDefaultWorkflow().addTarget(protocol=AmberMDSimulation,
+                                    targets=['memLigDefault'],
+                                    inputs=[''],
+                                    outputs=['workFlowSteps', 'summarySteps'])
