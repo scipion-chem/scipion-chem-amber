@@ -188,7 +188,6 @@ class AmberSystemPrep(EMProtocol):
     # --------------------------- STEPS functions ------------------------------
 
     def _insertAllSteps(self):
-        recFile = self.getReceptorPDB()
         molFile = self.getSpecifiedMolFile() if self.inputFrom.get() == LIGAND else None
         if molFile:
             self._insertFunctionStep('antechamberStep', molFile)
@@ -361,7 +360,7 @@ class AmberSystemPrep(EMProtocol):
             cmdsTleap.append(f"set SYSTEM box {{{x:.3f} {y:.3f} {z:.3f}}}")
 
         cmdsTleap.append(f"savepdb SYSTEM {targetBasename}.pdb")
-        cmdsTleap.append(f"saveAmberParm SYSTEM {targetBasename}.prmtop {targetBasename}.crd")
+        cmdsTleap.append(f"saveAmberParm SYSTEM {targetBasename}.parm7 {targetBasename}.crd")
         cmdsTleap.append(f"savepdb SYSTEM {targetBasename}_system.pdb")
 
         cmdsTleap.append("quit")
@@ -422,7 +421,7 @@ class AmberSystemPrep(EMProtocol):
         systemBasename = self.getSystemName()
         targetDir = self.getTargetFileDir()
 
-        srcTop = self.findFile(targetDir, '.prmtop')
+        srcTop = self.findFile(targetDir, '.parm7')
         srcCrd = self.findFile(targetDir, '.crd')
         srcSystemPdb = self.findFile(targetDir, '_system.pdb')
 
@@ -477,7 +476,7 @@ class AmberSystemPrep(EMProtocol):
             sdfFile = convertToSdf(self, molFile)
             paramFile = self.writePrepParamsFile([sdfFile])
             pwchemPlugin.runScript(self, scriptLigPrepName, paramFile, env=RDKIT_DIC, cwd=self._getPath())
-            return os.path.join(self.getLigandFileDir(), os.listdir(self.getLigandFileDir())[0])
+            return os.path.join(self.getLigandFileDir(), sdfFile)
 
     def writePrepParamsFile(self, molFiles):
         paramsFile = self.getLigParamFile()
