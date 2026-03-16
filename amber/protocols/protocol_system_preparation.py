@@ -176,7 +176,9 @@ class AmberSystemPrep(EMProtocol):
                        label='Water layer width Z (Å):',
                        help='Thickness of the water layer above/below the membrane in Z axis.')
 
-        line = group.addLine('Salt configuration: ',
+        group.addParam('addIons', params.BooleanParam, label='Add salt to the system: ',
+                       help='Add a specific concentration of ions to the system.', default=True)
+        line = group.addLine('Salt configuration: ', condition='addIons==True',
                              help='Ions to add to neutralize and to achive a desire salt concentration')
         line.addParam('cationType', params.EnumParam, label='Cation:',
                       default=1, help='Cation to add', choices=['Na+', 'K+'])
@@ -352,8 +354,9 @@ class AmberSystemPrep(EMProtocol):
 
             cmdsTleap.append("charge SYSTEM")
             cmdsTleap.append(f"{boxtype} SYSTEM {wat} {int(self.minDist.get())} iso")
-            cmdsTleap.append(
-                f"addIonsRand SYSTEM {self.getEnumText('cationType')} {nCation} {self.getEnumText('anionType')} {nAnion}")
+            if self.addIons.get():
+                cmdsTleap.append(
+                    f"addIonsRand SYSTEM {self.getEnumText('cationType')} {nCation} {self.getEnumText('anionType')} {nAnion}")
 
         # solvation membrane
         if hasMembrane:
@@ -447,10 +450,11 @@ class AmberSystemPrep(EMProtocol):
     # --------------------------- INFO functions -----------------------------------
     def getReceptorPDB(self):
         recPDB = os.path.abspath(self._getExtraPath(f'{self.getSystemName()}.pdb'))
-        if not os.path.exists(recPDB):
-            recFile = self.getReceptorFilename()
-            args = f'{recFile} --output {recPDB}'
-            pwchemPlugin.runOPENBABEL(self, 'pdbfixer', args=args, cwd=self._getExtraPath())
+        # if not os.path.exists(recPDB):
+        #     recFile = self.getReceptorFilename()
+        #     args = f'{recFile} --output {recPDB}'
+        #     pwchemPlugin.runOPENBABEL(self, 'pdbfixer', args=args, cwd=self._getExtraPath())
+        shutil.copy(self.getReceptorFilename(), recPDB)
         return recPDB
 
     def getReceptorFilename(self):
