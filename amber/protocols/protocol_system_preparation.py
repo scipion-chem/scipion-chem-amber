@@ -44,7 +44,9 @@ from amber import Plugin as amberPlugin
 
 import amber.objects as amberobj
 from amber.objects import *
-from amber.constants import AMBER_DIC
+from amber.constants import AMBER_DIC, PML_CAPPING_STR
+
+from Bio import PDB
 
 scriptLigPrepName = 'rdkit_addHydrogens.py'
 
@@ -101,6 +103,15 @@ class AmberSystemPrep(EMProtocol):
                        label='Run reduce first to add hydrogens: ')
         group.addParam('targetTleap', params.BooleanParam, default=False,
                        label='Use tleap to add missing atoms (EXPERIMENTAL): ')
+        group.addParam('addCaps', params.EnumParam, choices=['No', 'Gaps termini', 'All termini'], default=0,
+                       label='Add ACE and NME caps: ',
+                       help='Add acetyl (ACE) and N-methylamide (NME) capping groups to protein N-termini and C-termini respectively. '
+                            'These caps neutralize terminal charges and are commonly used in MD simulations. '
+                            '\n*None*: No caps added. '
+                            '\n*Gaps termini*: Add caps only to missing loops (internal gaps in the structure), '
+                            'preserving the real N- and C-termini uncapped. '
+                            '\n*All termini*: Add caps to both gaps and real protein termini.')
+
 
         form.addParam('tMem', params.BooleanParam, default=False,
                       label='Model a transmembrane protein',
@@ -235,8 +246,6 @@ class AmberSystemPrep(EMProtocol):
         amber.Plugin.runAmbertools(self, 'parmchk2', params, cwd=self.getLigandFileDir())
 
     def ligLeapStep(self):
-        # inputStructure = os.path.abspath(self.inputStructure.get().getFileName())
-        # systemBasename = os.path.basename(inputStructure.split(".")[0])
         molFile = self.findFile(self.getLigandFileDir(), '.mol2')
         frcmodFile = self.findFile(self.getLigandFileDir(), '.frcmod')
         molName = os.path.basename(frcmodFile.split(".")[0])
@@ -261,6 +270,17 @@ class AmberSystemPrep(EMProtocol):
         if not inputStructure.endswith('.pdb'):
             inputStructure = self.convertPDB(inputStructure)
         systemBasename = os.path.basename(inputStructure.split(".")[0])
+
+        addCapsMode = self.getEnumText('addCaps')
+        if addCapsMode in ['Gaps termini', 'All termini']:
+            mode = 'gaps' if addCapsMode == 'Gaps termini' else 'all'
+
+            cappedPdb = os.path.abspath(os.path.join(self.getTargetFileDir(), f'{systemBasename}_capped.pdb'))
+            pmlScript = self.addCapsPml(inputStructure, cappedPdb, mode)
+
+            self.runPymol(pmlScript, self.getTargetFileDir())
+            self.fixPdbTER(cappedPdb)
+            inputStructure = cappedPdb
 
         params = '{} -o {}_amber.pdb --dry'.format(inputStructure, systemBasename)
 
@@ -647,3 +667,139 @@ class AmberSystemPrep(EMProtocol):
         z_len = float(z_match.group(1))
 
         return x_len, y_len, z_len
+
+    def addCapsPml(self, inputPdb, outputPdb, mode='gaps'):
+        data = self.identifyTermini(inputPdb)
+
+        pmlLines = [
+            "reinitialize",
+            f"load {inputPdb}, protein",
+            "remove name OXT",
+            "hide all",
+            "show sticks, protein"
+        ]
+
+        for gap in data['gaps']:
+            # Adds NME on the C-term and ACE on the N-term of gaps
+            pmlLines.extend(self.addCapPmlCommand(gap['chain'], gap['c_term'], 'C', 'nme'))
+            pmlLines.extend(self.addCapPmlCommand(gap['chain'], gap['n_term'], 'N', 'ace'))
+
+        if mode == 'all':
+            for term in data['protein_termini']:
+                # Adds NME on the C-term and ACE on the N-term of chain termini
+                pmlLines.extend(self.addCapPmlCommand(term['chain'], term['n_term'], 'N', 'ace'))
+                pmlLines.extend(self.addCapPmlCommand(term['chain'], term['c_term'], 'C', 'nme'))
+
+        pmlLines.extend([
+            "remove hydro",
+            "sort protein",
+            f"save {outputPdb}, protein",
+            "quit"
+        ])
+
+        script_path = os.path.join(self.getTargetFileDir(),"capping_script.pml")
+        with open(script_path, "w") as f:
+            f.write("\n".join(pmlLines))
+
+        print(f"PML script for adding caps: {script_path} for mode: {mode}")
+        return script_path
+
+    def runPymol(self, pymolScript, workinDir):
+        # run in the background
+        self._log.info('Launching: ' + self._getPymol() + pymolScript)
+        self.runJob(f'{self._getPymol()} -cq', pymolScript, cwd=workinDir)
+
+    def _getPymol(self):
+        return pwchemPlugin.getEnvPath(OPENBABEL_DIC, 'bin/pymol')
+
+    def identifyTermini(self, inputPdb):
+        """
+        Parses a PDB file to identify chain N/C protein termini and
+        internal gaps that require capping.
+        """
+        parser = PDB.PDBParser(QUIET=True)
+        structure = parser.get_structure("protein", inputPdb)
+
+        result = {
+            'protein_termini': [],
+            'gaps': []
+        }
+
+        for model in structure:
+            for chain in model:
+                residues = [r for r in chain if PDB.is_aa(r)]
+                if not residues:
+                    continue
+
+                segments = []
+                currentSeqStart = residues[0].id[1]
+
+                for i in range(len(residues) - 1):
+                    res_curr = residues[i].id[1]
+                    res_next = residues[i + 1].id[1]
+
+                    # Check for a jump in residue numbering (a gap)
+                    if res_next != res_curr + 1:
+                        segments.append({'n': currentSeqStart, 'c': res_curr})
+                        currentSeqStart = res_next
+
+                # Add the final segment of the chain
+                segments.append({'n': currentSeqStart, 'c': residues[-1].id[1]})
+
+                result['protein_termini'].append({
+                    'chain': chain.id,
+                    'n_term': segments[0]['n'],
+                    'c_term': segments[-1]['c']
+                })
+
+                for i in range(len(segments) - 1):
+                    result['gaps'].append({
+                        'chain': chain.id,
+                        'c_term': segments[i]['c'],  # Needs NME
+                        'n_term': segments[i + 1]['n']  # Needs ACE
+                    })
+        return result
+
+    def addCapPmlCommand(self, chain, resi, atom, capType):
+        return [
+            f"select tmp_target, /protein//{chain}/{resi}/{atom}",
+            "edit tmp_target",
+            f"/editor.attach_amino_acid('pk1', '{capType}')"
+        ]
+
+    def fixPdbTER(self, pdbPath):
+        with open(pdbPath, 'r') as f:
+            lines = f.readlines()
+
+        cleanLines = [line for line in lines if not line.startswith("TER")]
+        fixedLines = []
+
+        for i, line in enumerate(cleanLines):
+            if line.startswith("ATOM"):
+                res_name = line[17:20].strip()
+                atom_name_raw = line[12:16]
+
+                # --- NME renaming - PyMOL usually outputs 'CH3', we rename it to 'C' ---
+                if res_name == "NME":
+                    if "CH3" in atom_name_raw:
+                        line = line[:12] + " C  " + line[16:]
+
+                fixedLines.append(line)
+
+                # --- TER Logic - gaps must be separated by a TER ---
+                if res_name == "NME":
+                    res_num = line[22:26].strip()
+                    if i + 1 < len(cleanLines):
+                        next_line = cleanLines[i + 1]
+                        if next_line.startswith("ATOM") and next_line[22:26].strip() != res_num:
+                            fixedLines.append("TER\n")
+                    else:
+                        fixedLines.append("TER\n")
+
+            elif line.startswith("END") or line.startswith("CONECT"):
+                fixedLines.append(line)
+            else:
+                fixedLines.append(line)
+
+        with open(pdbPath, 'w') as f:
+            f.writelines(fixedLines)
