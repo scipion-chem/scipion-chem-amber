@@ -129,11 +129,11 @@ class AmberSystemPrep(EMProtocol):
                        help='Molar ratio matching the lipid string (e.g., "1:1"). '
                             'Set to 1 if single lipid.')
         group.addParam('memPosition', params.EnumParam, choices=['Preoriented', 'MEMEMBED', 'PPM'],
-                       label='Membrane orientation method', condition='tMem', default='1',
-                       help='Select the method to orient the protein within the lipid bilayer: '
-                            '“Preoriented” uses existing PDB coordinates (i.e. from OPM) '
-                            '“MEMEMBED” performs a geometric search for the best embedding '
-                            '“PPM” uses an electrochemical model to calculate the optimal depth and tilt.')
+                       label='Membrane orientation method', condition='tMem', default=1,
+                       help='Select the method to orient the protein within the lipid bilayer:\n\n'
+                            '"Preoriented": uses existing PDB coordinates (i.e. from OPM).\n'
+                            '"MEMEMBED": performs a geometric search for the best embedding.\n'
+                            '"PPM": uses an electrochemical model to calculate the optimal depth and tilt.')
 
         form.addParam('Status', params.EnumParam, allowsNull=True, default=1,
                       choices=self._Status,
@@ -498,7 +498,7 @@ class AmberSystemPrep(EMProtocol):
             sdfFile = convertToSdf(self, molFile)
             paramFile = self.writePrepParamsFile([sdfFile])
             pwchemPlugin.runScript(self, scriptLigPrepName, paramFile, env=RDKIT_DIC, cwd=self._getPath())
-            return os.path.join(self.getLigandFileDir(), sdfFile)
+            return os.path.join(self.getLigandFileDir(), os.path.basename(sdfFile))
 
     def writePrepParamsFile(self, molFiles):
         paramsFile = self.getLigParamFile()
