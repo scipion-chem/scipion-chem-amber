@@ -44,7 +44,7 @@ from amber import Plugin as amberPlugin
 
 import amber.objects as amberobj
 from amber.objects import *
-from amber.constants import AMBER_DIC, PML_CAPPING_STR
+from amber.constants import AMBER_DIC
 
 from Bio import PDB
 
@@ -266,23 +266,26 @@ class AmberSystemPrep(EMProtocol):
         amber.Plugin.runAmbertools(self, 'tleap ', "-f leap_commands.txt", cwd=self.getLigandFileDir())
 
     def prepPdb(self):
-        inputStructure = self.getReceptorPDB()
+        recPDB = self.getReceptorPDB()
+        inputStructure = self.getInputReceptorFilename()
+        recPDB = os.path.abspath(self._getExtraPath(f'{self.getSystemName()}.pdb'))
         if not inputStructure.endswith('.pdb'):
             inputStructure = self.convertPDB(inputStructure)
-        systemBasename = os.path.basename(inputStructure.split(".")[0])
+        shutil.copy(inputStructure, recPDB)
 
+        systemBasename = os.path.basename(recPDB.split(".")[0])
         addCapsMode = self.getEnumText('addCaps')
         if addCapsMode in ['Gaps termini', 'All termini']:
             mode = 'gaps' if addCapsMode == 'Gaps termini' else 'all'
 
             cappedPdb = os.path.abspath(os.path.join(self.getTargetFileDir(), f'{systemBasename}_capped.pdb'))
-            pmlScript = self.addCapsPml(inputStructure, cappedPdb, mode)
+            pmlScript = self.addCapsPml(recPDB, cappedPdb, mode)
 
             self.runPymol(pmlScript, self.getTargetFileDir())
             self.fixPdbTER(cappedPdb)
-            inputStructure = cappedPdb
+            recPDB = cappedPdb
 
-        params = '{} -o {}_amber.pdb --dry'.format(inputStructure, systemBasename)
+        params = '{} -o {}_amber.pdb --dry'.format(recPDB, systemBasename)
 
         if self.targetProteinResidues:
             params += ' -p '
@@ -469,14 +472,9 @@ class AmberSystemPrep(EMProtocol):
     # --------------------------- INFO functions -----------------------------------
     def getReceptorPDB(self):
         recPDB = os.path.abspath(self._getExtraPath(f'{self.getSystemName()}.pdb'))
-        # if not os.path.exists(recPDB):
-        #     recFile = self.getReceptorFilename()
-        #     args = f'{recFile} --output {recPDB}'
-        #     pwchemPlugin.runOPENBABEL(self, 'pdbfixer', args=args, cwd=self._getExtraPath())
-        shutil.copy(self.getReceptorFilename(), recPDB)
         return recPDB
 
-    def getReceptorFilename(self):
+    def getInputReceptorFilename(self):
         if self.inputFrom.get() == STRUCTURE:
             proteinFile = self.inputStructure.get().getFileName()
         elif self.inputFrom.get() == LIGAND:
@@ -484,7 +482,7 @@ class AmberSystemPrep(EMProtocol):
         return os.path.abspath(proteinFile)
 
     def getSystemName(self):
-        return getBaseName(self.getReceptorFilename())
+        return getBaseName(self.getInputReceptorFilename())
 
     def getSpecifiedMolFile(self):
         myMol = None
