@@ -609,31 +609,138 @@ class AmberSystemPrep(EMProtocol):
 
         return nWaters, totalQ
 
+    # --------------------------- INFO functions -----------------------------------
+
     def _summary(self):
-        """ Summarize what the protocol has done"""
         summary = []
+        if hasattr(self, 'outputSystem'):
+            outSystem = self.outputSystem
 
-        if self.isFinished():
-            summary.append(
-                "This protocol has created a coordinate file, a topology file and a PDB file (for visualization)"
-                "with the selected Main force fields and Water Force Field")
+            # Input
+            summary.append(f'System file    : {outSystem.getSystemFile()}')
+            if self.inputFrom.get() == LIGAND:
+                summary.append(f'Ligand         : {self.inputLigand.get()}')
 
+            # Target preparation
+            prepFlags = []
+            if self.targetProteinResidues.get():    prepFlags.append('protein-only residues')
+            if self.targetAmberCompatibleResidues.get(): prepFlags.append('Amber-compatible residues')
+            if self.targetReduce.get():             prepFlags.append('reduce (add H)')
+            if self.targetTleap.get():              prepFlags.append('tleap missing atoms')
+            if self.targetPhSimulation.get():       prepFlags.append('constant-pH renaming')
+            if prepFlags:
+                summary.append(f'Target prep    : {", ".join(prepFlags)}')
+            if self.getEnumText("addCaps") != 'No':
+                summary.append(f'Capping        : {self.getEnumText("addCaps")}')
+
+            # Force fields
+            summary.append(f'Protein FF     : {self.getEnumText("proteinFF")}')
+            summary.append(f'Water FF       : {self.getEnumText("WaterForceField")}')
+            if self.inputFrom.get() == LIGAND:
+                summary.append(f'Ligand FF      : {self.getEnumText("ligandFF")} '
+                               f'/ charge: {self.getEnumText("ligandCharge")}')
+
+            # Solvent box
+            if self.tMem.get():
+                summary.append(f'Membrane       : {self.memLipids.get()} '
+                               f'(ratio {self.memRatio.get()}, '
+                               f'method: {self.getEnumText("memPosition")})')
+                summary.append(f'Lipid FF       : {self.getEnumText("lipidFF")}')
+            else:
+                summary.append(f'Solvation box  : {self.getEnumText("solvateStep")}, '
+                               f'padding {self.minDist.get()} Å')
+            if self.addIons.get():
+                summary.append(f'Salt           : {self.getEnumText("cationType")}/{self.getEnumText("anionType")} '
+                               f'at {self.ionConc.get()} M')
+
+            # Disulfide bridges
+            if self.DisulfideBridges.get():
+                summary.append(f'S-S bridges    : {self.DisulfideBridgesNumber.get()}')
+
+            # Output files
+            summary.append(f'Topology       : {outSystem.getTopologyFile()}')
+            summary.append(f'Coordinates    : {outSystem.getCrdFile()}')
         else:
-            summary.append("The protocol has not finished.")
+            summary.append('No output system produced yet.')
         return summary
 
     def _methods(self):
         methods = []
 
         if self.isFinished():
-            methods.append("This protocol takes a clean pdb file and it uses the "
-                           "AMBER software in order to transform the file into an amber format while applying to it "
-                           'the force fields for the system and the water molecules.\n To do so, it calls the two main'
-                           'preparation programs in AmberTools21: pdb4amber and LEaP. \n'
-                           'Finally, the program LEap returns two files which will be necessary for the MD simulation'
-                           '(.crd and .prmtop files) and a .pdb file to visualize the structure')
+            # Input preparation
+            if self.inputFrom.get() == LIGAND:
+                methods.append(
+                    f'The ligand "{self.inputLigand.get()}" was extracted from the input set of molecules '
+                    f'and prepared using RDKit (hydrogen addition). Antechamber was then used to assign '
+                    f'partial charges ({self.getEnumText("ligandCharge")}) and generate mol2/frcmod parameter '
+                    f'files, followed by parmchk2 to complete missing force field parameters. '
+                    f'An initial ligand topology was built with tleap using the '
+                    f'{self.getEnumText("ligandFF")} force field.'
+                )
+
+            # Target preparation
+            prepSteps = []
+            if self.targetProteinResidues.get():
+                prepSteps.append('non-protein residues were removed')
+            if self.targetAmberCompatibleResidues.get():
+                prepSteps.append('only Amber-compatible residues were kept')
+            if self.targetPhSimulation.get():
+                prepSteps.append('titratable residues (GLU, ASP, HIS) were renamed for constant-pH simulation')
+            if self.targetReduce.get():
+                prepSteps.append('hydrogens were added with reduce')
+            if self.targetTleap.get():
+                prepSteps.append('missing heavy atoms were rebuilt with tleap')
+            if self.getEnumText('addCaps') != 'No':
+                prepSteps.append(f'ACE/NME capping groups were added at {self.getEnumText("addCaps").lower()} '
+                                 f'using PyMol')
+
+            prepStr = (f'The receptor PDB was processed with pdb4amber'
+                       + (f', during which {"; ".join(prepSteps)}' if prepSteps else '')
+                       + ', producing an Amber-ready PDB file.')
+            methods.append(prepStr)
+
+            # Membrane
+            if self.tMem.get():
+                methods.append(
+                    f'The protein was embedded in a lipid bilayer composed of {self.memLipids.get()} '
+                    f'(molar ratio {self.memRatio.get()}) using packmol-memgen. '
+                    f'Membrane orientation was determined by the "{self.getEnumText("memPosition")}" method. '
+                    f'The lipid {self.getEnumText("lipidFF")} force field was applied. '
+                    f'The protein and, if present, the ligand were subsequently aligned to the membrane system.'
+                )
+
+            # System assembly with tleap
+            boxDesc = (f'a {self.getEnumText("solvateStep").lower()} water box with '
+                       f'{self.minDist.get()} Å padding'
+                       if not self.tMem.get()
+                       else f'a pre-built membrane box '
+                            f'({self.memDistXY.get()} Å XY / {self.memDistZ.get()} Å Z water layer)')
+
+            ionDesc = (f' Ions ({self.getEnumText("cationType")}/{self.getEnumText("anionType")}) '
+                       f'were added to neutralise the system and reach a salt concentration '
+                       f'of {self.ionConc.get()} M, calculated using the SPLIT method '
+                       f'(Machado & Pantano, J. Chem. Theory Comput. 2020).'
+                       if self.addIons.get() else '')
+
+            ssDesc = (f' Disulfide bridges were defined between residue pairs '
+                      f'{self.DisulfideBridgesNumber.get()}.'
+                      if self.DisulfideBridges.get() else '')
+
+            methods.append(
+                f'The full system was assembled with tleap using the {self.getEnumText("proteinFF")} '
+                f'protein force field and the {self.getEnumText("WaterForceField")} water model, '
+                f'solvated in {boxDesc}.{ionDesc}{ssDesc} '
+                f'tleap produced the topology (.parm7), coordinate (.crd), and PDB files required '
+                f'for the MD simulation.'
+            )
+
+        else:
+            methods.append('The protocol has not finished yet.')
 
         return methods
+
+    # --------------------------- UTILS functions -----------------------------------
 
     def findFile(self, directory, extension):
         if os.path.exists(directory):

@@ -668,7 +668,7 @@ class AmberMDSimulation(EMProtocol):
             return None
 
         outputTrj = os.path.abspath(self._getExtraPath('prepSimulation.nc'))
-        topFile = self.amberSystem.get().getTopologyFile()
+        topFile = os.path.abspath(self.amberSystem.get().getTopologyFile())
         cpptrajInParams = ['autoimage']
         cpptrajInParams.append(f"trajout {outputTrj}")
         cpptrajInParams.append("run")
