@@ -28,6 +28,7 @@
 This module will perform energy minimizations and equilibrium for the system befor MD simultion
 """
 import os, glob, shutil
+from os.path import relpath
 
 from pyworkflow.protocol import params
 from pyworkflow.utils import Message, runJob, createLink
@@ -284,13 +285,16 @@ class AmberMDSimulation(EMProtocol):
     def createOutputStep(self):
         lastCrdFile, lastTopoFile, lastOutFile = self.getPrevFinishedStageFiles()
         oriSystemFile = self.amberSystem.get().getSystemFile()
+        ligTopFile = self.amberSystem.get().getLigTopologyFile()
+        ligID = self.amberSystem.get().getLigandID()
 
         localCrdFile, localTopFile = self._getPath('outputSystem.rst7'), self._getPath('systemTopology.parm7')
         shutil.copyfile(lastCrdFile, localCrdFile), shutil.copyfile(lastTopoFile, localTopFile)
 
         mFF, wFF = self.getFFFiles()
 
-        outSystem = AmberSystem(filename=oriSystemFile, ff=mFF, wff=wFF, nTime=self.calculateTotalSimTime())
+        outSystem = AmberSystem(filename=relpath(oriSystemFile), ff=mFF, wff=wFF, nTime=self.calculateTotalSimTime(),
+                                ligTopFile=ligTopFile, ligName=ligID)
         outSystem.setTopologyFile(localTopFile)
         outSystem.setCrdFile(localCrdFile)
 

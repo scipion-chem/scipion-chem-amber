@@ -27,8 +27,7 @@
 """
 This module will prepare the system for the simulation
 """
-from os.path import abspath
-
+from os.path import abspath, relpath
 import os, re, math, shutil
 
 from pwem.protocols import EMProtocol, ProtImportFiles
@@ -346,7 +345,7 @@ class AmberSystemPrep(EMProtocol):
 
         # membrane
         if hasMembrane:
-            memStructure = self.findFile(self.getTargetFileDir(), "membrane.pdb")
+            memStructure = self.findFile(self.getTargetFileDir(),   "membrane.pdb")
             cmdsTleap.append(f"MEMB = loadPdb {memStructure}")
             components.append('MEMB')
             if hasLigand:
@@ -451,9 +450,9 @@ class AmberSystemPrep(EMProtocol):
         srcCrd = self.findFile(targetDir, '.crd')
         srcSystemPdb = self.findFile(targetDir, '_system.pdb')
 
-        destTop = abspath(self._getPath(f'{systemBasename}.parm7'))
-        destCrd = abspath(self._getPath(f'{systemBasename}.rst7'))
-        destSystemPdb = abspath(self._getPath(f'{systemBasename}_system.pdb'))
+        destTop = relpath(self._getPath(f'{systemBasename}.parm7'))
+        destCrd = relpath(self._getPath(f'{systemBasename}.rst7'))
+        destSystemPdb = relpath(self._getPath(f'{systemBasename}_system.pdb'))
 
         shutil.copy(srcTop, destTop)
         shutil.copy(srcCrd, destCrd)
@@ -464,8 +463,9 @@ class AmberSystemPrep(EMProtocol):
                                              wff=self.getEnumText('WaterForceField'))
 
         if self.inputFrom.get() == LIGAND:
-            molFile = self.findFile(self.getLigandFileDir(), '.mol2')
+            molFile = relpath(self.findFile(self.getLigandFileDir(), '.mol2'))
             createdSystem.setLigTopologyFile(molFile)
+            createdSystem.setLigandID('LIG')
 
         self._defineOutputs(outputSystem=createdSystem)
 
@@ -499,6 +499,18 @@ class AmberSystemPrep(EMProtocol):
             paramFile = self.writePrepParamsFile([sdfFile])
             pwchemPlugin.runScript(self, scriptLigPrepName, paramFile, env=RDKIT_DIC, cwd=self._getPath())
             return os.path.join(self.getLigandFileDir(), os.path.basename(sdfFile))
+
+    def getSpecifiedMol(self):
+      myMol = None
+      for mol in self.inputSetOfMols.get():
+        if mol.__str__() == self.inputLigand.get():
+          myMol = mol.clone()
+          break
+      if myMol == None:
+        print('The input ligand is not found')
+        return None
+      else:
+        return myMol
 
     def writePrepParamsFile(self, molFiles):
         paramsFile = self.getLigParamFile()
@@ -908,3 +920,6 @@ class AmberSystemPrep(EMProtocol):
 
         with open(pdbPath, 'w') as f:
             f.writelines(fixedLines)
+
+    def getLigandName(self):
+        return self.getSpecifiedMol().getMolName()
