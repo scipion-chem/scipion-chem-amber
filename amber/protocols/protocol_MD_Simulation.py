@@ -295,6 +295,7 @@ class AmberMDSimulation(EMProtocol):
 
         outSystem = AmberSystem(filename=relpath(oriSystemFile), ff=mFF, wff=wFF, nTime=self.calculateTotalSimTime(),
                                 ligTopFile=ligTopFile, ligName=ligID)
+
         outSystem.setTopologyFile(localTopFile)
         outSystem.setCrdFile(localCrdFile)
 
@@ -302,6 +303,7 @@ class AmberMDSimulation(EMProtocol):
         concatTrjFile = self.prepareSimTrj()
         shutil.copyfile(concatTrjFile, outputTrajectory)
         outSystem.setTrajectoryFile(outputTrajectory)
+        outSystem.readTrjInfo(protocol=self, nTime=self.calculateTotalSimTime(), outDir=self._getExtraPath())
 
         self._defineOutputs(outputSystem=outSystem)
 
@@ -691,7 +693,7 @@ class AmberMDSimulation(EMProtocol):
 
     def calculateTotalSimTime(self):
         """
-        Calculates the total simulation time (in ns) by summing
+        Calculates the total simulation time (in ps) by summing
         MDSteps * TimeStep for all production and heating stages.
         """
         total_ps = 0.0
@@ -705,7 +707,7 @@ class AmberMDSimulation(EMProtocol):
             if msjDic.get('stepType') in ['Simulation', 'Custom']:
                 total_ps += msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.0)
 
-        return total_ps / 1000.0
+        return total_ps
 
     def getLastHeatingTemp(self):
         """Get the final temperature from the last Heating step in the workflow"""
