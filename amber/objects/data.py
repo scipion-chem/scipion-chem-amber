@@ -46,15 +46,12 @@ class AmberSystem(MDSystem):
         self._nFrames = pwobj.Integer(kwargs.get('nFrames', None))
         self._nTime = pwobj.Float(kwargs.get('nTime', None))
 
-        self._firstFrame = Integer(0)
-        self._lastFrame = Integer(0)
-
     def __str__(self):
         strStr = '{} ({}'.format(self.getClassName(), os.path.basename(self.getSystemFile()))
 
         if self.hasTrajectory():
-            strStr += ', frames: {} - {}, time(ps): {:.1f}'.format(
-                *self.getFrameIdxs(),
+            strStr += ', frames: {}, time(ps): {:.1f}'.format(
+                self.getNFrames(),
                 self.getNTime()
             )
         strStr += ')'
@@ -69,22 +66,14 @@ class AmberSystem(MDSystem):
     def getNFrames(self):
         return self._nFrames.get()
 
+    def setNFrames(self, value):
+        self._nFrames.set(value)
+
     def getNTime(self):
         return self._nTime.get()
 
     def setNTime(self, value):
         self._nTime.set(value)
-
-    def setFrameIdxs(self, idxs):
-        """Store first and last frame indices (1-based integers).
-
-        Parameters
-        ----------
-        idxs : list | tuple
-            [firstFrame, lastFrame]
-        """
-        self._firstFrame.set(int(idxs[0]))
-        self._lastFrame.set(int(idxs[1]))
 
     def getFrameIdxs(self):
         """Return [firstFrame, lastFrame] as Python ints.
@@ -100,54 +89,33 @@ class AmberSystem(MDSystem):
     def readTrjInfo(self, protocol, nTime, outDir=None):
         topFile = os.path.abspath(self.getTopologyFile())
         trjFile = os.path.abspath(self.getTrajectoryFile())
-        outDir = os.path.dirname(self.getTrajectoryFile()) if not outDir else outDir
 
-        nFrames = self._cpptrajGetNFrames(protocol, topFile, trjFile, outDir)
+        nFrames = self._cpptrajGetNFrames(protocol, topFile, trjFile)
 
-        firstFrame = 1
-        lastFrame = nFrames if nFrames is not None else 1
-        self.setFrameIdxs([firstFrame, lastFrame])
-
+        self.setNFrames(nFrames)
         self.setNTime(nTime)
 
 
-    # ── helpers (add these as methods of AmberSystem) ─────────────────────────────
+    # ── helpers ─────────────────────────────
 
-    def _cpptrajGetNFrames(self, protocol, topFile, trjFile, outDir):
+    def _cpptrajGetNFrames(self, protocol, topFile, trjFile):
         """
         Run ``cpptraj -p <top> -y <traj> -tl`` and parse ``Frames: <N>``
         from STDOUT.  Returns None if parsing fails.
         """
-
-        logFile = os.path.abspath(os.path.join(outDir, 'trjinfo_tl.log'))
-
-        # runAmberProgram must redirect stdout; we capture via -o flag if available,
-        # otherwise read the scipion stdout log produced by the protocol runner.
-        args = '-p {} -y {} -tl -o {}'.format(topFile, trjFile, logFile)
+        args = '-p {} -y {} -tl'.format(topFile, trjFile)
         amberPlugin.runAmbertools(protocol, program='cpptraj',
-                                    args=args, cwd=outDir)
+                                    args=args)
 
-        nFrames = None
-        if os.path.exists(logFile):
-            with open(logFile) as fh:
-                for line in fh:
-                    m = re.search(r'Frames:\s*(\d+)', line)
-                    if m:
-                        nFrames = int(m.group(1))
-                        break
-
-        # Fallback: parse from the protocol run.stdout / run.stderr logs
-        if nFrames is None:
-            for logName in ('run.stdout', 'run.stderr'):
-                candidate = protocol._getPath('logs', logName)
-                if os.path.exists(candidate):
-                    with open(candidate) as fh:
-                        for line in fh:
-                            m = re.search(r'Frames:\s*(\d+)', line)
-                            if m:
-                                nFrames = int(m.group(1))
-                                break
-                if nFrames is not None:
-                    break
+        for logName in ('run.stdout', 'run.stderr'):
+            candidate = protocol._getPath('logs', logName)
+            if os.path.exists(candidate):
+                with open(candidate) as fh:
+                    for line in fh:
+                        m = re.search(r'Frames:\s*(\d+)', line)
+                        if m:
+                            nFrames = int(m.group(1))
+                            break
+                break
 
         return nFrames

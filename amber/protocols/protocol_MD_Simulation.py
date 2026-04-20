@@ -30,6 +30,7 @@ This module will perform energy minimizations and equilibrium for the system bef
 import os, glob, shutil
 from os.path import relpath
 
+from pyworkflow.mapper.sqlite import SELF
 from pyworkflow.protocol import params
 from pyworkflow.utils import Message, runJob, createLink
 
@@ -301,10 +302,14 @@ class AmberMDSimulation(EMProtocol):
 
         outputTrajectory = self._getPath('outputTrajectory.nc')
         concatTrjFile = self.prepareSimTrj()
-        shutil.copyfile(concatTrjFile, outputTrajectory)
-        outSystem.setTrajectoryFile(outputTrajectory)
-        outSystem.readTrjInfo(protocol=self, nTime=self.calculateTotalSimTime(), outDir=self._getExtraPath())
+        if concatTrjFile is not None:
+            outputTrajectory = self._getPath('outputTrajectory.nc')
+            shutil.copyfile(concatTrjFile, outputTrajectory)
+            outSystem.setTrajectoryFile(outputTrajectory)
+            outSystem.readTrjInfo(protocol=self, nTime=self.calculateTotalSimTime(),
+                                  outDir=self._getExtraPath())
 
+        finalPdbFile = self.crdToPDB(localCrdFile, localTopFile)
         self._defineOutputs(outputSystem=outSystem)
 
     # --------------------------- INFO functions -----------------------------------
@@ -628,6 +633,17 @@ class AmberMDSimulation(EMProtocol):
                     outFile = os.path.join(stageDir, file)
 
         return os.path.abspath(crdFile), os.path.abspath(topFile), outFile
+
+    def crdToPDB(self, crdFile, topFile):
+        """Run ambpdb to convert the final restart coordinates to a PDB file.
+        """
+        systemName = os.path.splitext(os.path.basename(self.amberSystem.get().getSystemFile()))[0]
+        finalPdbFile = self._getPath(f'{systemName}_final.pdb')
+
+        cmd = f'-p {os.path.abspath(topFile)} -c {os.path.abspath(crdFile)} > {os.path.abspath(finalPdbFile)}'
+        amberPlugin.runAmbertools(self,'ambpdb', args=cmd, cwd=self._getExtraPath())
+
+        return finalPdbFile
 
     def getFFFiles(self):
         system = self.amberSystem.get()
