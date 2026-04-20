@@ -28,7 +28,8 @@ import os
 
 from pyworkflow.tests import BaseTest, setupTestProject, DataSet
 from pwem.protocols import ProtImportPdb
-from pwchem.tests import TestPrepareReceptor, TestExtractLigand
+from pwchem.tests.tests_preparations import TestPrepareReceptor
+from pwchem.tests.tests_docking import TestExtractLigand
 from pwchem.protocols import ProtExtractLigands
 
 from amber.protocols import *
