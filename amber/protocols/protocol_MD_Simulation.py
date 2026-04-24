@@ -36,6 +36,7 @@ from pyworkflow.utils import Message, runJob, createLink
 
 import amber
 from pwem.protocols import EMProtocol
+from pwem.objects import AtomStruct
 
 from pwchem.utils import natural_sort
 
@@ -310,7 +311,8 @@ class AmberMDSimulation(EMProtocol):
                                   outDir=self._getExtraPath())
 
         finalPdbFile = self.crdToPDB(localCrdFile, localTopFile)
-        self._defineOutputs(outputSystem=outSystem)
+        finalAtomStruct = AtomStruct(filename=relpath(finalPdbFile))
+        self._defineOutputs(outputSystem=outSystem, lastFramePdb=finalAtomStruct)
 
     # --------------------------- INFO functions -----------------------------------
     def _summary(self):
