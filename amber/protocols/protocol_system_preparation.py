@@ -385,18 +385,42 @@ class AmberSystemPrep(EMProtocol):
             cmdsTleap.append(f"set SYSTEM box {{{x:.3f} {y:.3f} {z:.3f}}}")
 
         cmdsTleap.append(f"savepdb SYSTEM {targetBasename}.pdb")
-        cmdsTleap.append(f"saveAmberParm SYSTEM {targetBasename}.parm7 {targetBasename}.crd")
+        cmdsTleap.append(f"saveAmberParm SYSTEM {targetBasename}_woChains.parm7 {targetBasename}.crd")
         cmdsTleap.append(f"savepdb SYSTEM {targetBasename}_system.pdb")
 
         cmdsTleap.append("quit")
-
-        # Write leap script + run
         leapFile = os.path.join(self.getTargetFileDir(), "leap_commands.txt")
 
         with open(leapFile, "w") as f:
             f.write("\n".join(cmdsTleap))
 
         amber.Plugin.runAmbertools(self, "tleap", "-f leap_commands.txt", cwd=self.getTargetFileDir())
+
+        # Add chain information with parmed
+        cmdsParmed = [
+            f"parm {targetBasename}_woChains.parm7",
+            f"addPDB {inputStructure}",
+            f"outparm {targetBasename}.parm7",
+            "quit"
+        ]
+
+        parmedFile = os.path.join(self.getTargetFileDir(), "parmed_commands.txt")
+        with open(parmedFile, "w") as f:
+            f.write("\n".join(cmdsParmed))
+
+        amber.Plugin.runAmbertools(self, "parmed", "-i parmed_commands.txt", cwd=self.getTargetFileDir())
+
+        # 2. Generate the final system PDB with Chain IDs using ambpdb
+        # (ambpdb outputs to stdout, so we write it directly via Python's subprocess)
+
+        final_pdb_path = os.path.join(self.getTargetFileDir(), f"{targetBasename}_system_chains.pdb")
+        ambpdb_cmd = f"-p {targetBasename}.parm7 -c {targetBasename}.crd -ext > {final_pdb_path}"
+
+        with open(final_pdb_path, "w") as out_pdb:
+            amber.Plugin.runAmbertools(self, "ambpdb", ambpdb_cmd, cwd=self.getTargetFileDir())
+            # subprocess.run(ambpdb_cmd, cwd=self.getTargetFileDir(), stdout=out_pdb)
+
+        print(f"System PDB with Chain IDs saved to: {final_pdb_path}")
 
     def membraneStep(self):
         inputStructure = self.findFile(self.getTargetFileDir(), '_amber.pdb')
@@ -446,8 +470,8 @@ class AmberSystemPrep(EMProtocol):
         systemBasename = self.getSystemName()
         targetDir = self.getTargetFileDir()
 
-        srcTop = self.findFile(targetDir, '.parm7')
-        srcCrd = self.findFile(targetDir, '.crd')
+        srcTop = os.path.join(targetDir, f'{systemBasename}.parm7')
+        srcCrd = os.path.join(targetDir, f'{systemBasename}.crd')
         srcSystemPdb = self.findFile(targetDir, '_system.pdb')
 
         destTop = relpath(self._getPath(f'{systemBasename}.parm7'))

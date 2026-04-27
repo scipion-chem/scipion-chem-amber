@@ -238,7 +238,7 @@ class AmberMDSimulation(EMProtocol):
                        help='Summary of the defined steps. \nManual modification will have no '
                             'effect, use the wizards to add / delete the steps')
         group.addParam('deleteStep', params.StringParam, default='',
-                       label='Delete relaxation step number: ',
+                       label='Delete step number: ',
                        help='Delete the step of the specified index from the workflow.')
         # group.addParam('watchStep', params.StringParam, default='',
         #                label='Watch relaxation step number: ',
@@ -312,7 +312,7 @@ class AmberMDSimulation(EMProtocol):
 
         finalPdbFile = self.crdToPDB(localCrdFile, localTopFile)
         finalAtomStruct = AtomStruct(filename=relpath(finalPdbFile))
-        self._defineOutputs(outputSystem=outSystem, lastFramePdb=finalAtomStruct)
+        self._defineOutputs(outputSystem=outSystem, lastFrameStruct=finalAtomStruct)
 
     # --------------------------- INFO functions -----------------------------------
     def _summary(self):
@@ -637,13 +637,24 @@ class AmberMDSimulation(EMProtocol):
         return os.path.abspath(crdFile), os.path.abspath(topFile), outFile
 
     def crdToPDB(self, crdFile, topFile):
-        """Run ambpdb to convert the final restart coordinates to a PDB file.
+        """Run cpptraj to strip waters and ions and save the coordinates to a PDB file.
         """
         systemName = os.path.splitext(os.path.basename(self.amberSystem.get().getSystemFile()))[0]
         finalPdbFile = self._getPath(f'{systemName}_final.pdb')
 
-        cmd = f'-p {os.path.abspath(topFile)} -c {os.path.abspath(crdFile)} > {os.path.abspath(finalPdbFile)}'
-        amberPlugin.runAmbertools(self,'ambpdb', args=cmd, cwd=self._getExtraPath())
+        cpptrajCmds = f"""parm {os.path.abspath(topFile)}
+            trajin {os.path.abspath(crdFile)}
+            strip :WAT,Na+,Cl-,K+,Mg2+,Ca2+
+            trajout {os.path.abspath(finalPdbFile)} pdb
+            run
+            quit
+            """
+        scriptPath = self._getExtraPath('strip_solvent_cpptraj.in')
+        with open(scriptPath, 'w') as f:
+            f.write(cpptrajCmds)
+
+        cmd = f'-i {os.path.abspath(scriptPath)}'
+        amberPlugin.runAmbertools(self, 'cpptraj', args=cmd, cwd=self._getExtraPath())
 
         return finalPdbFile
 
