@@ -373,6 +373,7 @@ class AmberSystemPrep(EMProtocol):
             waterModel = self.getEnumText("WaterForceField")
             wat = waterBoxes[waterModel]
 
+            cmdsTleap.append("center SYSTEM")
             cmdsTleap.append("charge SYSTEM")
             cmdsTleap.append(f"{boxtype} SYSTEM {wat} {int(self.minDist.get())} iso")
             if self.addIons.get():
@@ -815,19 +816,21 @@ class AmberSystemPrep(EMProtocol):
         pmlLines = [
             "reinitialize",
             f"load {inputPdb}, protein",
-            "remove name OXT",
+            "remove hydro",
             "hide all",
             "show sticks, protein"
         ]
 
         for gap in data['gaps']:
             # Adds NME on the C-term and ACE on the N-term of gaps
+            pmlLines.append(self.removeOXTCommand(gap['chain'], gap['c_term']))
             pmlLines.extend(self.addCapPmlCommand(gap['chain'], gap['c_term'], 'C', 'nme'))
             pmlLines.extend(self.addCapPmlCommand(gap['chain'], gap['n_term'], 'N', 'ace'))
 
         if mode == 'all':
             for term in data['protein_termini']:
                 # Adds NME on the C-term and ACE on the N-term of chain termini
+                pmlLines.append(self.removeOXTCommand(gap['chain'], gap['c_term']))
                 pmlLines.extend(self.addCapPmlCommand(term['chain'], term['n_term'], 'N', 'ace'))
                 pmlLines.extend(self.addCapPmlCommand(term['chain'], term['c_term'], 'C', 'nme'))
 
@@ -907,6 +910,9 @@ class AmberSystemPrep(EMProtocol):
             "edit tmp_target",
             f"/editor.attach_amino_acid('pk1', '{capType}')"
         ]
+
+    def removeOXTCommand(self, chain, resi):
+        return f"remove /protein//{chain}/{resi}/OXT"
 
     def fixPdbTER(self, pdbPath):
         with open(pdbPath, 'r') as f:
