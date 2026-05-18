@@ -308,10 +308,7 @@ class AmberSystemPrep(EMProtocol):
         else:
             inputStructure = self.findFile(self.getTargetFileDir(), '_amber.pdb')
 
-        if self.inputFrom.get() == LIGAND:
-            targetBasename = os.path.basename(self.findFile(self.getLigandFileDir(), '.sdf').split(".")[0])
-        else:
-            targetBasename = os.path.basename(self.getReceptorPDB().split(".")[0])
+        targetBasename = self.getTleapSystemName()
         if not hasMembrane:
             nCation, nAnion = self.calcIonConc(inputStructure, self.getEnumText('proteinFF'),
                                                self.getEnumText('WaterForceField'), self.ionConc.get())
@@ -468,12 +465,14 @@ class AmberSystemPrep(EMProtocol):
                               cwd=self.getTargetFileDir())
 
     def createOutputStep(self):
-        systemBasename = self.getSystemName()
+        systemBasename = self.getTleapSystemName()
         targetDir = self.getTargetFileDir()
 
         srcTop = os.path.join(targetDir, f'{systemBasename}.parm7')
         srcCrd = os.path.join(targetDir, f'{systemBasename}.crd')
-        srcSystemPdb = self.findFile(targetDir, '_system.pdb')
+        srcSystemPdb = os.path.join(targetDir, f'{systemBasename}_system_chains.pdb')
+        if not os.path.exists(srcSystemPdb):
+            srcSystemPdb = os.path.join(targetDir, f'{systemBasename}_system.pdb')
 
         destTop = relpath(self._getPath(f'{systemBasename}.parm7'))
         destCrd = relpath(self._getPath(f'{systemBasename}.rst7'))
@@ -508,6 +507,14 @@ class AmberSystemPrep(EMProtocol):
 
     def getSystemName(self):
         return getBaseName(self.getInputReceptorFilename())
+
+    def getTleapSystemName(self):
+        """Return the basename used by tleap/parmed for the final system files."""
+        if self.inputFrom.get() == LIGAND:
+            sdfFile = self.findFile(self.getLigandFileDir(), '.sdf')
+            if sdfFile:
+                return os.path.splitext(os.path.basename(sdfFile))[0]
+        return os.path.basename(self.getReceptorPDB().split(".")[0])
 
     def getSpecifiedMolFile(self):
         myMol = None
