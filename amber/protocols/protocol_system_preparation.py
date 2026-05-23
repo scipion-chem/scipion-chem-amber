@@ -62,7 +62,7 @@ class AmberSystemPrep(EMProtocol):
     IMPORT_FROM_FILE = 1
     IMPORT_FROM_SCIPION = 1
 
-    _ChargeModel = ['AM1-BCC', 'Mulliken', 'Gasteiger']
+    _chargeModel = ['AM1-BCC', 'Mulliken', 'Gasteiger']
     _Status = ['brief', 'default', 'verbose']
 
     # -------------------------- DEFINE param functions ----------------------
@@ -101,7 +101,7 @@ class AmberSystemPrep(EMProtocol):
         group.addParam('targetReduce', params.BooleanParam, default=True,
                        label='Run reduce first to add hydrogens: ')
         group.addParam('targetTleap', params.BooleanParam, default=False,
-                       label='Use tleap to add missing atoms (EXPERIMENTAL): ')
+                       label='Add missing atoms: ')
         group.addParam('addCaps', params.EnumParam, choices=['No', 'Gaps termini', 'All termini'], default=0,
                        label='Add ACE and NME caps: ',
                        help='Add acetyl (ACE) and N-methylamide (NME) capping groups to protein N-termini and C-termini respectively. '
@@ -136,7 +136,7 @@ class AmberSystemPrep(EMProtocol):
 
         form.addParam('Status', params.EnumParam, allowsNull=True, default=1,
                       choices=self._Status,
-                      label='Choose status information: ')
+                      label='Choose Status information: ')
 
         form.addSection('MD prep')
         group = form.addGroup('Force field', help='Force field applied to the system. Force fields are sets of '
@@ -149,7 +149,7 @@ class AmberSystemPrep(EMProtocol):
                        choices=['ff14SB', 'ff19SB', 'ff14SBonlysc', 'ff15ipq', 'fb15', 'ff03.r1', 'ff03ua'],
                        default=0)
 
-        group.addParam('ligandCharge', params.EnumParam, default=2, choices=self._ChargeModel,
+        group.addParam('ligandCharge', params.EnumParam, default=2, choices=self._chargeModel,
                        condition=LIG_INPUT, label="Small molecules charge method: ",
                        help='Small molecules charge method to use')
         group.addParam('ligandFF', params.EnumParam, default=1, choices=['gaff', 'gaff2', 'ESPALOMA'],
@@ -158,17 +158,17 @@ class AmberSystemPrep(EMProtocol):
 
         group.addParam('lipidFF', params.EnumParam, condition='tMem',
                        label='Type', choices=['lipid21', 'lipid17'], default=0)
-        group.addParam('WaterForceField', params.EnumParam, default=0,
+        group.addParam('waterForceField', params.EnumParam, default=0,
                        choices=['tip4pew', 'spce', 'spceb', 'opc', 'opc3', 'tip3p'],
                        allowsNull=True,
                        label='Water Force Field',
                        help='Force field applied to the water')
         group = form.addGroup('Disulfide bridges')
-        group.addParam('DisulfideBridges', params.BooleanParam,
+        group.addParam('disulfideBridges', params.BooleanParam,
                        label='Are there any S-S bridges?', default=False,
                        help='Residues involved must be renamed to CYX in the pdb file')
-        group.addParam('DisulfideBridgesNumber', params.StringParam,
-                       condition='DisulfideBridges',
+        group.addParam('disulfideBridgesNumber', params.StringParam,
+                       condition='disulfideBridges',
                        label='Number of the residues involved in the disulfide bridge \n'
                              'with format 1º Residue - 2º Residue / 1º Residue - 2º Residue')
 
@@ -311,13 +311,13 @@ class AmberSystemPrep(EMProtocol):
         targetBasename = self.getTleapSystemName()
         if not hasMembrane:
             nCation, nAnion = self.calcIonConc(inputStructure, self.getEnumText('proteinFF'),
-                                               self.getEnumText('WaterForceField'), self.ionConc.get())
+                                               self.getEnumText('waterForceField'), self.ionConc.get())
             print(f'{nCation} cations and {nAnion} anion will be added\n')
 
         cmdsTleap = []
         # load force fields
         cmdsTleap.append(f"source leaprc.protein.{self.getEnumText('proteinFF')}")
-        cmdsTleap.append(f"source leaprc.water.{self.getEnumText('WaterForceField')}")
+        cmdsTleap.append(f"source leaprc.water.{self.getEnumText('waterForceField')}")
         if hasMembrane:
             cmdsTleap.append(f"source leaprc.{self.getEnumText('lipidFF')}")
         if hasLigand:
@@ -327,8 +327,8 @@ class AmberSystemPrep(EMProtocol):
         components = []
         cmdsTleap.append(f"PROT = loadPdb {inputStructure}")
         components.append('PROT')
-        if self.DisulfideBridges:
-            for pair in self.DisulfideBridgesNumber.get().split('/'):
+        if self.disulfideBridges:
+            for pair in self.disulfideBridgesNumber.get().split('/'):
                 first = pair.split('-')[0]
                 second = pair.split('-')[1]
                 cmdsTleap.append(f"bond PROT.{first}.SG PROT.{second}.SG")
@@ -367,7 +367,7 @@ class AmberSystemPrep(EMProtocol):
                 "opc": "OPCBOX",
                 "opc3": "OPC3BOX"
             }
-            waterModel = self.getEnumText("WaterForceField")
+            waterModel = self.getEnumText("waterForceField")
             wat = waterBoxes[waterModel]
 
             cmdsTleap.append("center SYSTEM")
@@ -484,7 +484,7 @@ class AmberSystemPrep(EMProtocol):
 
         createdSystem = amberobj.AmberSystem(filename=destSystemPdb, crdFile=destCrd, topoFile=destTop,
                                              ff=self.getEnumText('proteinFF'),
-                                             wff=self.getEnumText('WaterForceField'))
+                                             wff=self.getEnumText('waterForceField'))
 
         if self.inputFrom.get() == LIGAND:
             molFile = relpath(self.findFile(self.getLigandFileDir(), '.mol2'))
@@ -679,7 +679,7 @@ class AmberSystemPrep(EMProtocol):
 
             # Force fields
             summary.append(f'Protein FF     : {self.getEnumText("proteinFF")}')
-            summary.append(f'Water FF       : {self.getEnumText("WaterForceField")}')
+            summary.append(f'Water FF       : {self.getEnumText("waterForceField")}')
             if self.inputFrom.get() == LIGAND:
                 summary.append(f'Ligand FF      : {self.getEnumText("ligandFF")} '
                                f'/ charge: {self.getEnumText("ligandCharge")}')
@@ -698,8 +698,8 @@ class AmberSystemPrep(EMProtocol):
                                f'at {self.ionConc.get()} M')
 
             # Disulfide bridges
-            if self.DisulfideBridges.get():
-                summary.append(f'S-S bridges    : {self.DisulfideBridgesNumber.get()}')
+            if self.disulfideBridges.get():
+                summary.append(f'S-S bridges    : {self.disulfideBridgesNumber.get()}')
 
             # Output files
             summary.append(f'Topology       : {outSystem.getTopologyFile()}')
@@ -768,12 +768,12 @@ class AmberSystemPrep(EMProtocol):
                        if self.addIons.get() else '')
 
             ssDesc = (f' Disulfide bridges were defined between residue pairs '
-                      f'{self.DisulfideBridgesNumber.get()}.'
-                      if self.DisulfideBridges.get() else '')
+                      f'{self.disulfideBridgesNumber.get()}.'
+                      if self.disulfideBridges.get() else '')
 
             methods.append(
                 f'The full system was assembled with tleap using the {self.getEnumText("proteinFF")} '
-                f'protein force field and the {self.getEnumText("WaterForceField")} water model, '
+                f'protein force field and the {self.getEnumText("waterForceField")} water model, '
                 f'solvated in {boxDesc}.{ionDesc}{ssDesc} '
                 f'tleap produced the topology (.parm7), coordinate (.crd), and PDB files required '
                 f'for the MD simulation.'

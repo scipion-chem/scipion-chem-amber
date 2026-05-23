@@ -667,7 +667,7 @@ class AmberMDSimulation(EMProtocol):
 
         cpptrajCmds = f"""parm {os.path.abspath(topFile)}
             trajin {os.path.abspath(crdFile)}
-            strip :WAT,Na+,Cl-,K+,Mg2+,Ca2+
+            strip :{ENV_RES}
             trajout {os.path.abspath(finalPdbFile)} pdb
             run
             quit
