@@ -165,12 +165,11 @@ class AmberSystemPrep(EMProtocol):
                        help='Force field applied to the water')
         group = form.addGroup('Disulfide bridges')
         group.addParam('disulfideBridges', params.BooleanParam,
-                       label='Are there any S-S bridges?', default=False,
-                       help='Residues involved must be renamed to CYX in the pdb file')
+                       label='Are there any S-S bond?', default=False,
+                       help='Residues involved in the S-S bond.')
         group.addParam('disulfideBridgesNumber', params.StringParam,
                        condition='disulfideBridges',
-                       label='Number of the residues involved in the disulfide bridge \n'
-                             'with format 1º Residue - 2º Residue / 1º Residue - 2º Residue')
+                       label='Residues involved in the disulfide bridge: \n')
 
         group = form.addGroup('Solvent box')
         group.addParam('solvateStep', params.EnumParam, default=0, condition='tMem==False',
@@ -204,7 +203,7 @@ class AmberSystemPrep(EMProtocol):
         if molFile:
             self._insertFunctionStep(self.antechamberStep, molFile)
             self._insertFunctionStep(self.ligLeapStep)
-        self._insertFunctionStep(self.prepPdb)
+        self._insertFunctionStep(self.prepPdbStep)
         if self.tMem.get():
             self._insertFunctionStep(self.membraneStep)
         self._insertFunctionStep(self.tleapStep)
@@ -264,7 +263,7 @@ class AmberSystemPrep(EMProtocol):
 
         amber.Plugin.runAmbertools(self, 'tleap ', "-f leap_commands.txt", cwd=self.getLigandFileDir())
 
-    def prepPdb(self):
+    def prepPdbStep(self):
         recPDB = self.getReceptorPDB()
         inputStructure = self.getInputReceptorFilename()
         recPDB = os.path.abspath(self._getExtraPath(f'{self.getSystemName()}.pdb'))
@@ -272,6 +271,9 @@ class AmberSystemPrep(EMProtocol):
             inputStructure = self.convertPDB(inputStructure)
         shutil.copy(inputStructure, recPDB)
         systemBasename = os.path.basename(recPDB.split(".")[0])
+
+        self.renameCysToCyx(recPDB, self.disulfideBridgesNumber.get())
+
         addCapsMode = self.getEnumText('addCaps')
         if addCapsMode in ['Gaps termini', 'All termini']:
             mode = 'gaps' if addCapsMode == 'Gaps termini' else 'all'
@@ -1012,3 +1014,26 @@ class AmberSystemPrep(EMProtocol):
             f.writelines(lines)
 
         return outputPDB
+
+    def renameCysToCyx(self, pdbFile, disulfideStr):
+        """Compactly parse bond string and update PDB CYS -> CYX inline."""
+        if not disulfideStr:
+            return
+
+        # Set comprehension to instantly build a lookup of (chain, resNum)
+        targets = {
+            (res.split('_')[0], int(res.split('_')[1]))
+            for pair in disulfideStr.split('/') if pair
+            for res in pair.split('-')
+        }
+
+        with open(pdbFile, 'r') as f:
+            lines = f.readlines()
+
+        with open(pdbFile, 'w') as f:
+            for l in lines:
+                if l.startswith(('ATOM', 'HETATM')) and l[17:20].strip() == 'CYS':
+                    chain, resNum = l[21].strip() or '_', l[22:26].strip()
+                    if resNum.replace('-', '').isdigit() and (chain, int(resNum)) in targets:
+                        l = l[:17] + 'CYX' + l[20:]  # Modify only residue name
+                f.write(l)
