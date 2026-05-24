@@ -202,13 +202,13 @@ class AmberSystemPrep(EMProtocol):
     def _insertAllSteps(self):
         molFile = self.getSpecifiedMolFile() if self.inputFrom.get() == LIGAND else None
         if molFile:
-            self._insertFunctionStep('antechamberStep', molFile)
-            self._insertFunctionStep('ligLeapStep')
-        self._insertFunctionStep('prepPdb')
+            self._insertFunctionStep(self.antechamberStep, molFile)
+            self._insertFunctionStep(self.ligLeapStep)
+        self._insertFunctionStep(self.prepPdb)
         if self.tMem.get():
-            self._insertFunctionStep('membraneStep')
-        self._insertFunctionStep('tleapStep')
-        self._insertFunctionStep('createOutputStep')
+            self._insertFunctionStep(self.membraneStep)
+        self._insertFunctionStep(self.tleapStep)
+        self._insertFunctionStep(self.createOutputStep)
 
     def antechamberStep(self, molFile):
         molName = os.path.basename(molFile).split(".")[0]
@@ -271,7 +271,6 @@ class AmberSystemPrep(EMProtocol):
         if not inputStructure.endswith('.pdb'):
             inputStructure = self.convertPDB(inputStructure)
         shutil.copy(inputStructure, recPDB)
-
         systemBasename = os.path.basename(recPDB.split(".")[0])
         addCapsMode = self.getEnumText('addCaps')
         if addCapsMode in ['Gaps termini', 'All termini']:
@@ -281,8 +280,10 @@ class AmberSystemPrep(EMProtocol):
             pmlScript = self.addCapsPml(recPDB, cappedPdb, mode)
 
             self.runPymol(pmlScript, self.getTargetFileDir())
-            self.fixPdbTER(cappedPdb)
+            # self.fixPdbTER(cappedPdb)
             recPDB = cappedPdb
+
+        self.insertTERLines(recPDB)
 
         params = '{} -o {}_amber.pdb --dry'.format(recPDB, systemBasename)
 
@@ -960,3 +961,54 @@ class AmberSystemPrep(EMProtocol):
 
     def getLigandName(self):
         return self.getSpecifiedMol().getMolName()
+
+    def insertTERLines(self, inputPDB, outputPDB=None):
+        """Insert TER between chains and gaps, fixing NME caps."""
+        if outputPDB is None:
+            outputPDB = inputPDB
+
+        lines = []
+        prevChain = None
+        prevResNum = None
+        prevResName = None
+        lastAtomSerial = None
+
+        with open(inputPDB, 'r') as f:
+            for line in f:
+                # Skip all existing TER records - we'll re-add them correctly
+                if line.startswith('TER'):
+                    continue
+
+                if line.startswith(('ATOM', 'HETATM')):
+                    atomSerial = int(line[6:11].strip())
+                    resName = line[17:20].strip()
+                    chainID = line[21:22].strip()
+                    resSeq = int(line[22:26].strip())
+
+                    # NME renaming: CH3 → C
+                    if resName == "NME" and "CH3" in line[12:16]:
+                        line = line[:12] + " C  " + line[16:]
+
+                    # Check if TER needed
+                    needTER = False
+                    if prevChain is not None:
+                        if chainID != prevChain or abs(resSeq - prevResNum) > 1:
+                            needTER = True
+
+                    if needTER:
+                        terSerial = lastAtomSerial + 1
+                        terLine = f"TER   {terSerial:5d}      {prevResName:3s} {prevChain}{prevResNum:4d}\n"
+                        lines.append(terLine)
+
+                    lines.append(line)
+                    prevChain = chainID
+                    prevResNum = resSeq
+                    prevResName = resName
+                    lastAtomSerial = atomSerial
+                else:
+                    lines.append(line)
+
+        with open(outputPDB, 'w') as f:
+            f.writelines(lines)
+
+        return outputPDB
