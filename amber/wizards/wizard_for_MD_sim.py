@@ -26,9 +26,11 @@
 # **************************************************************************
 
 # Imports
+import os
 import tkinter as tk
 from tkinter import messagebox
 from pwchem.wizards import DeleteElementWizard, VariableWizard, WatchElementWizard
+from pwchem.utils import cifFromASFile
 
 from ..protocols import AmberMDSimulation, AmberSystemPrep
 from ..constants import *
@@ -164,50 +166,54 @@ class DisulfideBondWizard(VariableWizard):
     """Wizard to select multiple pairs of CYS residues for disulfide bond creation"""
     _targets, _inputs, _outputs = [], {}, {}
 
-    def parseCysResidues(self, pdbFile):
+    def parseCysResidues(self, inputFile, protocol):
         """Parse PDB/mmCIF file and return CYS residues grouped by chain
         Returns: {chainName: [(resIdx, resName), ...], ...}
-        Handles both traditional PDB format and mmCIF format
+        Standardizes any input to mmCIF format using pwem utilities before parsing.
         """
         cysDict = {}
-        is_mmcif = False
 
-        with open(pdbFile) as f:
-            for line in f:
-                if line.startswith(('ATOM', 'HETATM')):
-                    parts = line.split()
-                    if len(parts) > 10 and parts[0] in ('ATOM', 'HETATM'):
-                        is_mmcif = True
-                    break
+        # 1. FIX: Use .cif extension for the temporary file instead of .pdb
+        base, _ = os.path.splitext(os.path.basename(inputFile))
+        tmpCifPath = os.path.abspath(protocol.getProject().getTmpPath(f'{base}_temp.cif'))
 
-        with open(pdbFile) as f:
+        # Convert/copy input to mmCIF
+        cifFile = cifFromASFile(inputFile, tmpCifPath)
+
+        if not cifFile or not os.path.exists(cifFile):
+            print(f"ERROR: Conversion failed or mmCIF file missing: {cifFile}")
+            return {}
+
+        with open(cifFile, 'r') as f:
             for line in f:
+                # Standard mmCIF coordinate rows start with ATOM or HETATM tokens
                 if not line.startswith(('ATOM', 'HETATM')):
                     continue
 
                 try:
-                    if is_mmcif:
-                        parts = line.split()
-                        if len(parts) < 10: continue
-                        resName = parts[5]
-                        chainId = parts[6]
-                        resIdx = int(parts[8])
-                    else:
-                        if len(line) < 27: continue
-                        resName = line[17:20].strip()
-                        chainId = line[21].strip()
-                        resNumStr = line[22:26].strip()
+                    parts = line.split()
+                    if len(parts) < 10:
+                        continue
 
-                        if not resNumStr or not resNumStr.replace('-', '').isdigit():
-                            continue
-                        resIdx = int(resNumStr)
+                    # 2. FIX: Extract the variables from standard mmCIF columns
+                    # parts[5] = Residue Name (e.g., CYS)
+                    # parts[6] = Chain ID (e.g., A)
+                    # parts[8] = Sequence Index / Residue Number (e.g., 14)
 
+                    resName = parts[5].strip()
                     if resName != 'CYS':
                         continue
 
+                    chainId = parts[6].strip()
                     if not chainId or chainId == '.':
                         chainId = '_'
 
+                    resNumStr = parts[8].strip()
+                    if not resNumStr or not resNumStr.replace('-', '').isdigit():
+                        continue
+                    resIdx = int(resNumStr)
+
+                    # Add to dictionary
                     if chainId not in cysDict:
                         cysDict[chainId] = set()
 
@@ -217,6 +223,14 @@ class DisulfideBondWizard(VariableWizard):
                     print(f"WARNING: Could not parse line: {line.rstrip()}\n  Error: {e}")
                     continue
 
+        # 3. FIX: Safe cleanup. ONLY delete if it's the temporary file we created
+        if cifFile == tmpCifPath and os.path.exists(tmpCifPath):
+            try:
+                os.remove(tmpCifPath)
+            except OSError:
+                pass
+
+        # Sort values sequentially by residue index per chain
         for chain in cysDict:
             cysDict[chain] = sorted(list(cysDict[chain]), key=lambda x: x[0])
 
@@ -398,7 +412,7 @@ class DisulfideBondWizard(VariableWizard):
             print("ERROR: Could not get PDB file from input object")
             return
 
-        cysDict = self.parseCysResidues(pdbFile)
+        cysDict = self.parseCysResidues(pdbFile, protocol)
 
         if not cysDict:
             messagebox.showwarning("No CYS Found", "No cysteine residues found in the structure")

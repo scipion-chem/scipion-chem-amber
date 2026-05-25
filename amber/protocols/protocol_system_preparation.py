@@ -78,7 +78,7 @@ class AmberSystemPrep(EMProtocol):
         form.addSection(label=Message.LABEL_INPUT)
         iGroup = form.addGroup('Input')
 
-        iGroup.addParam('inputFrom', params.EnumParam, default=STRUCTURE,
+        iGroup.addParam('inputFrom', params.EnumParam, default=STRUCTURE, display=params.EnumParam.DISPLAY_HLIST,
                         label='Input from: ', choices=['AtomStruct', 'SetOfSmallMolecules'],
                         help='Type of input you want to use')
         iGroup.addParam('inputStructure', params.PointerParam, pointerClass='AtomStruct',
@@ -289,7 +289,7 @@ class AmberSystemPrep(EMProtocol):
 
         self.insertTERLines(recPDB)
 
-        params = '{} -o {}_amber.pdb --dry'.format(recPDB, systemBasename)
+        params = '{} -o {}_amber.pdb --dry --nohyd --no-conect'.format(recPDB, systemBasename)
 
         if self.targetProteinResidues:
             params += ' -p '
@@ -333,21 +333,34 @@ class AmberSystemPrep(EMProtocol):
         cmdsTleap.append(f"PROT = loadPdb {inputStructure}")
         components.append('PROT')
 
-        if self.getEnumText('disulfideBridges') == 'Manual':
-            print("Processing manual disulfide configuration...")
-            # Fetch original PDB file from the prepPdbStep execution
-            originalPdb = os.path.abspath(self._getExtraPath(f'{self.getSystemName()}.pdb'))
+        if self.getEnumText('disulfideBridges') == 'Automatic':
+            print("Using automated disulfide detection from pdb4amber...")
+            sslinkFile = os.path.join(self.getTargetFileDir(), f'{self.getSystemName()}_amber_sslink')
 
-            # Run mapping: rewrites amberPdb, handles CYX/CYS conversion, kills bad CONECTs
+            if os.path.exists(sslinkFile):
+                bonds = []
+                with open(sslinkFile, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#'):
+                            parts = line.split()
+                            if len(parts) >= 2:
+                                bonds.append(f"bond PROT.{parts[0]}.SG PROT.{parts[1]}.SG")
+
+                cmdsTleap.extend(bonds)
+            else:
+                print(f"  Notice: No sslink file found, skipping automated disulfides")
+
+        else:
+            print("Processing manual disulfide configuration...")
+            originalPdb = self._getExtraPath(f'{self.getSystemName()}.pdb')
             manual_bonds = self._applyManualDisulfideBridges(
-                originalPdb=originalPdb,
+                originalPdb=os.path.abspath(originalPdb),
                 amberPdb=inputStructure,
                 manualBridgesStr=self.disulfideBridgesNumber.get(),
                 unitName="PROT"
             )
             cmdsTleap.extend(manual_bonds)
-        else:
-            print("Using automated disulfide detection from pdb4amber.")
 
         # ligand
         if hasLigand and not hasMembrane:
