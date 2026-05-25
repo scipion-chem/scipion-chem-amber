@@ -164,11 +164,13 @@ class AmberSystemPrep(EMProtocol):
                        label='Water Force Field',
                        help='Force field applied to the water')
         group = form.addGroup('Disulfide bridges')
-        group.addParam('disulfideBridges', params.BooleanParam,
-                       label='Are there any S-S bond?', default=False,
-                       help='Residues involved in the S-S bond.')
+        group.addParam('disulfideBridges', params.EnumParam, display=params.EnumParam.DISPLAY_HLIST,
+                       label='Define S-S bonds', default=0,
+                       choices=['Automatic', 'Manual'],
+                       help='Automatic:  If a distance SG-SG less than 2.5 Angstrom is found between the SG atoms of two CYS, a disulfide bond is assumed.\n'
+                            'Manual: Define the CYS residues involved in the bonds using the wizard.')
         group.addParam('disulfideBridgesNumber', params.StringParam,
-                       condition='disulfideBridges',
+                       condition='disulfideBridges == 1',
                        label='Residues involved in the disulfide bridge: \n')
 
         group = form.addGroup('Solvent box')
@@ -272,7 +274,7 @@ class AmberSystemPrep(EMProtocol):
         shutil.copy(inputStructure, recPDB)
         systemBasename = os.path.basename(recPDB.split(".")[0])
 
-        self.renameCysToCyx(recPDB, self.disulfideBridgesNumber.get())
+        # self.renameCysToCyx(recPDB, self.disulfideBridgesNumber.get())
 
         addCapsMode = self.getEnumText('addCaps')
         if addCapsMode in ['Gaps termini', 'All termini']:
@@ -330,11 +332,22 @@ class AmberSystemPrep(EMProtocol):
         components = []
         cmdsTleap.append(f"PROT = loadPdb {inputStructure}")
         components.append('PROT')
-        if self.disulfideBridges:
-            for pair in self.disulfideBridgesNumber.get().split('/'):
-                first = pair.split('-')[0]
-                second = pair.split('-')[1]
-                cmdsTleap.append(f"bond PROT.{first}.SG PROT.{second}.SG")
+
+        if self.getEnumText('disulfideBridges') == 'Manual':
+            print("Processing manual disulfide configuration...")
+            # Fetch original PDB file from the prepPdbStep execution
+            originalPdb = os.path.abspath(self._getExtraPath(f'{self.getSystemName()}.pdb'))
+
+            # Run mapping: rewrites amberPdb, handles CYX/CYS conversion, kills bad CONECTs
+            manual_bonds = self._applyManualDisulfideBridges(
+                originalPdb=originalPdb,
+                amberPdb=inputStructure,
+                manualBridgesStr=self.disulfideBridgesNumber.get(),
+                unitName="PROT"
+            )
+            cmdsTleap.extend(manual_bonds)
+        else:
+            print("Using automated disulfide detection from pdb4amber.")
 
         # ligand
         if hasLigand and not hasMembrane:
@@ -496,7 +509,7 @@ class AmberSystemPrep(EMProtocol):
 
         self._defineOutputs(outputSystem=createdSystem)
 
-    # --------------------------- INFO functions -----------------------------------
+    # --------------------------- UTILS functions -----------------------------------
     def getReceptorPDB(self):
         recPDB = os.path.abspath(self._getExtraPath(f'{self.getSystemName()}.pdb'))
         return recPDB
@@ -840,7 +853,7 @@ class AmberSystemPrep(EMProtocol):
         if mode == 'all':
             for term in data['protein_termini']:
                 # Adds NME on the C-term and ACE on the N-term of chain termini
-                pmlLines.append(self.removeOXTCommand(gap['chain'], gap['c_term']))
+                pmlLines.append(self.removeOXTCommand(term['chain'], term['c_term']))
                 pmlLines.extend(self.addCapPmlCommand(term['chain'], term['n_term'], 'N', 'ace'))
                 pmlLines.extend(self.addCapPmlCommand(term['chain'], term['c_term'], 'C', 'nme'))
 
@@ -1037,3 +1050,138 @@ class AmberSystemPrep(EMProtocol):
                     if resNum.replace('-', '').isdigit() and (chain, int(resNum)) in targets:
                         l = l[:17] + 'CYX' + l[20:]  # Modify only residue name
                 f.write(l)
+
+    def extractSSBonds(self, pdbFile, unitName="PROT"):
+        """
+        Extracts disulfide bonds from PDB CONECT lines and formats them for tleap.
+        """
+        atom_to_res = {}
+        conect_pairs = []
+
+        with open(pdbFile, 'r') as f:
+            for line in f:
+                if line.startswith(('ATOM', 'HETATM')):
+                    try:
+                        # Extract Atom Serial (7-11) and Residue Number (23-26)
+                        atom_serial = int(line[6:11].strip())
+                        res_num = int(line[22:26].strip())
+                        atom_name = line[12:16].strip()
+                        atom_to_res[atom_serial] = (res_num, atom_name)
+                    except ValueError:
+                        continue
+                elif line.startswith('CONECT'):
+                    parts = line.split()
+                    if len(parts) >= 3:
+                        try:
+                            # Extract the atom serials
+                            atom1, atom2 = int(parts[1]), int(parts[2])
+                            conect_pairs.append((atom1, atom2))
+                        except ValueError:
+                            continue
+
+        tleap_commands = []
+        for a1, a2 in conect_pairs:
+            if a1 in atom_to_res and a2 in atom_to_res:
+                res1_num, name1 = atom_to_res[a1]
+                res2_num, name2 = atom_to_res[a2]
+
+                # Sanity check: Ensure we are bonding Sulfurs
+                if name1.startswith('S') and name2.startswith('S'):
+                    tleap_commands.append(f"bond {unitName}.{res1_num}.{name1} {unitName}.{res2_num}.{name2}")
+
+        return tleap_commands
+
+    def _applyManualDisulfideBridges(self, originalPdb, amberPdb, manualBridgesStr, unitName="PROT"):
+        """
+        Maps original PDB residue numbering to sequential amber numbering,
+        forces requested residues to CYX (and resets unrequested ones to CYS),
+        and returns the explicit tleap bond commands.
+        """
+        # 1. Parse manual selection string (e.g., "A_3-A_40/A_4-A_32")
+        # Build a set of target residues in the original format: {("A", 3), ("A", 40), ...}
+        requested_orig_residues = set()
+        requested_pairs = []
+        for pair in manualBridgesStr.split('/'):
+            if '-' in pair:
+                try:
+                    r1, r2 = pair.split('-')
+                    c1, n1 = r1.split('_')
+                    c2, n2 = r2.split('_')
+                    requested_orig_residues.add((c1, int(n1)))
+                    requested_orig_residues.add((c2, int(n2)))
+                    requested_pairs.append(((c1, int(n1)), (c2, int(n2))))
+                except ValueError:
+                    continue
+
+        # 2. Map Original Residues -> Amber Residues using CA/C/N backbone coordinates
+        # (This is bulletproof against renumbering, gaps, and missing sidechains)
+        orig_backbones = {}  # (x, y, z) -> (chain, resNum)
+        with open(originalPdb, 'r') as f:
+            for line in f:
+                if line.startswith(('ATOM')) and line[12:16].strip() in ['CA', 'C', 'N']:
+                    chain = line[21].strip() or '_'
+                    try:
+                        res_num = int(line[22:26].strip())
+                        x, y, z = float(line[30:38]), float(line[38:46]), float(line[46:54])
+                        orig_backbones[(round(x, 2), round(y, 2), round(z, 2))] = (chain, res_num)
+                    except ValueError:
+                        continue
+
+        orig_to_amber_map = {}  # Tuple(chain, orig_resNum) -> amber_resNum
+        with open(amberPdb, 'r') as f:
+            for line in f:
+                if line.startswith(('ATOM', 'HETATM')) and line[12:16].strip() in ['CA', 'C', 'N']:
+                    try:
+                        amber_res = int(line[22:26].strip())
+                        x, y, z = float(line[30:38]), float(line[38:46]), float(line[46:54])
+                        coord_key = (round(x, 2), round(y, 2), round(z, 2))
+
+                        if coord_key in orig_backbones:
+                            orig_key = orig_backbones[coord_key]
+                            orig_to_amber_map[orig_key] = amber_res
+                    except ValueError:
+                        continue
+
+        # 3. Rewrite _amber.pdb: Enforce CYX/CYS and strip ALL CONECT lines
+        clean_lines = []
+        with open(amberPdb, 'r') as f:
+            for line in f:
+                if line.startswith(('ATOM', 'HETATM')):
+                    res_name = line[17:20].strip()
+                    if res_name in ['CYS', 'CYX']:
+                        try:
+                            amber_res = int(line[22:26].strip())
+                            # Find if this amber residue maps back to a manually requested original residue
+                            is_requested = False
+                            for orig_key, amb_res in orig_to_amber_map.items():
+                                if amb_res == amber_res and orig_key in requested_orig_residues:
+                                    is_requested = True
+                                    break
+
+                            # Enforce CYX for requested, reset to CYS for everything else
+                            target_res_name = 'CYX' if is_requested else 'CYS'
+                            if res_name != target_res_name:
+                                line = line[:17] + target_res_name + line[20:]
+                        except ValueError:
+                            pass
+                    clean_lines.append(line)
+                elif line.startswith('CONECT'):
+                    # Strip out automated CONECT records entirely so they don't fight manual settings
+                    continue
+                else:
+                    clean_lines.append(line)
+
+        with open(amberPdb, 'w') as f:
+            f.writelines(clean_lines)
+
+        # 4. Generate explicit tleap bond commands using the translated amber residue IDs
+        tleap_bonds = []
+        for orig1, orig2 in requested_pairs:
+            if orig1 in orig_to_amber_map and orig2 in orig_to_amber_map:
+                amb1 = orig_to_amber_map[orig1]
+                amb2 = orig_to_amber_map[orig2]
+                tleap_bonds.append(f"bond {unitName}.{amb1}.SG {unitName}.{amb2}.SG")
+            else:
+                print(f"WARNING: Could not map manual bridge pair {orig1} - {orig2} to Amber topology.")
+
+        return tleap_bonds
