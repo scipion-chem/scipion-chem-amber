@@ -790,12 +790,12 @@ class AmberSystemPrep(EMProtocol):
             "quit"
         ])
 
-        script_path = os.path.join(self.getTargetFileDir(),"capping_script.pml")
-        with open(script_path, "w") as f:
+        scriptPath = os.path.join(self.getTargetFileDir(),"capping_script.pml")
+        with open(scriptPath, "w") as f:
             f.write("\n".join(pmlLines))
 
-        print(f"PML script for adding caps: {script_path} for mode: {mode}")
-        return script_path
+        print(f"PML script for adding caps: {scriptPath} for mode: {mode}")
+        return scriptPath
 
     def runPymol(self, pymolScript, workinDir):
         # run in the background
@@ -818,38 +818,28 @@ class AmberSystemPrep(EMProtocol):
             'gaps': []
         }
 
-        for model in structure:
-            for chain in model:
-                residues = [r for r in chain if PDB.is_aa(r)]
-                if not residues:
-                    continue
+        for chain in structure.get_chains():
+            residues = [r for r in chain if PDB.is_aa(r)]
+            if not residues:
+                continue
 
-                segments = []
-                currentSeqStart = residues[0].id[1]
+            # Extract global N and C termini from the first and last amino acids
+            result['protein_termini'].append({
+                'chain': chain.id,
+                'n_term': residues[0].id[1],
+                'c_term': residues[-1].id[1]
+            })
 
-                for i in range(len(residues) - 1):
-                    res_curr = residues[i].id[1]
-                    res_next = residues[i + 1].id[1]
+            # Detect sequence breaks inline without building intermediate segment arrays
+            for resCurr, resNext in zip(residues, residues[1:]):
+                currId = resCurr.id[1]
+                nextId = resNext.id[1]
 
-                    # Check for a jump in residue numbering (a gap)
-                    if res_next != res_curr + 1:
-                        segments.append({'n': currentSeqStart, 'c': res_curr})
-                        currentSeqStart = res_next
-
-                # Add the final segment of the chain
-                segments.append({'n': currentSeqStart, 'c': residues[-1].id[1]})
-
-                result['protein_termini'].append({
-                    'chain': chain.id,
-                    'n_term': segments[0]['n'],
-                    'c_term': segments[-1]['c']
-                })
-
-                for i in range(len(segments) - 1):
+                if nextId != currId + 1:
                     result['gaps'].append({
                         'chain': chain.id,
-                        'c_term': segments[i]['c'],  # Needs NME
-                        'n_term': segments[i + 1]['n']  # Needs ACE
+                        'c_term': currId,  # Needs NME
+                        'n_term': nextId  # Needs ACE
                     })
         return result
 
@@ -869,33 +859,24 @@ class AmberSystemPrep(EMProtocol):
 
         cleanLines = [line for line in lines if not line.startswith("TER")]
         fixedLines = []
+        numLines = len(cleanLines)
 
         for i, line in enumerate(cleanLines):
-            if line.startswith("ATOM"):
-                res_name = line[17:20].strip()
-                atom_name_raw = line[12:16]
+            fixedLines.append(line)
 
-                # --- NME renaming - PyMOL usually outputs 'CH3', we rename it to 'C' ---
-                if res_name == "NME":
-                    if "CH3" in atom_name_raw:
-                        line = line[:12] + " C  " + line[16:]
+            # Guard Clause: Skip any line that isn't an NME ATOM record
+            if not line.startswith("ATOM") or line[17:20].strip() != "NME":
+                continue
 
-                fixedLines.append(line)
+            # If it's the very last line, it needs a TER
+            if i + 1 >= numLines:
+                fixedLines.append("TER\n")
+                continue
 
-                # --- TER Logic - gaps must be separated by a TER ---
-                if res_name == "NME":
-                    res_num = line[22:26].strip()
-                    if i + 1 < len(cleanLines):
-                        next_line = cleanLines[i + 1]
-                        if next_line.startswith("ATOM") and next_line[22:26].strip() != res_num:
-                            fixedLines.append("TER\n")
-                    else:
-                        fixedLines.append("TER\n")
-
-            elif line.startswith("END") or line.startswith("CONECT"):
-                fixedLines.append(line)
-            else:
-                fixedLines.append(line)
+            # Otherwise, check if the next atom belongs to a different residue
+            nextLine = cleanLines[i + 1]
+            if nextLine.startswith("ATOM") and nextLine[22:26].strip() != line[22:26].strip():
+                fixedLines.append("TER\n")
 
         with open(pdbPath, 'w') as f:
             f.writelines(fixedLines)
@@ -905,49 +886,47 @@ class AmberSystemPrep(EMProtocol):
 
     def insertTERLines(self, inputPDB, outputPDB=None):
         """Insert TER between chains and gaps, fixing NME caps."""
-        if outputPDB is None:
-            outputPDB = inputPDB
-
+        outputPDB = outputPDB or inputPDB
         lines = []
+
         prevChain = None
-        prevResNum = None
-        prevResName = None
-        lastAtomSerial = None
+        prevResNum = 0
+        prevResName = ""
+        lastAtomSerial = 0
 
         with open(inputPDB, 'r') as f:
             for line in f:
-                # Skip all existing TER records - we'll re-add them correctly
+                # Skip existing TER lines
                 if line.startswith('TER'):
                     continue
 
-                if line.startswith(('ATOM', 'HETATM')):
-                    atomSerial = int(line[6:11].strip())
-                    resName = line[17:20].strip()
-                    chainID = line[21:22].strip()
-                    resSeq = int(line[22:26].strip())
-
-                    # NME renaming: CH3 → C
-                    if resName == "NME" and "CH3" in line[12:16]:
-                        line = line[:12] + " C  " + line[16:]
-
-                    # Check if TER needed
-                    needTER = False
-                    if prevChain is not None:
-                        if chainID != prevChain or abs(resSeq - prevResNum) > 1:
-                            needTER = True
-
-                    if needTER:
-                        terSerial = lastAtomSerial + 1
-                        terLine = f"TER   {terSerial:5d}      {prevResName:3s} {prevChain}{prevResNum:4d}\n"
-                        lines.append(terLine)
-
+                # Pass non-atom lines straight through and skip the rest of the loop
+                if not line.startswith(('ATOM', 'HETATM')):
                     lines.append(line)
-                    prevChain = chainID
-                    prevResNum = resSeq
-                    prevResName = resName
-                    lastAtomSerial = atomSerial
-                else:
-                    lines.append(line)
+                    continue
+
+                # --- Main ATOM/HETATM parsing ---
+                atomSerial = int(line[6:11].strip())
+                resName = line[17:20].strip()
+                chainID = line[21:22].strip()
+                resSeq = int(line[22:26].strip())
+
+                # NME renaming: CH3 → C
+                if resName == "NME" and "CH3" in line[12:16]:
+                    line = line[:12] + " C  " + line[16:]
+
+                # Detect chain break or gap to insert TER
+                if prevChain and (chainID != prevChain or abs(resSeq - prevResNum) > 1):
+                    terSerial = lastAtomSerial + 1
+                    lines.append(f"TER   {terSerial:5d}      {prevResName:3s} {prevChain}{prevResNum:4d}\n")
+
+                lines.append(line)
+
+                # Update state variables for the next iteration
+                prevChain = chainID
+                prevResNum = resSeq
+                prevResName = resName
+                lastAtomSerial = atomSerial
 
         with open(outputPDB, 'w') as f:
             f.writelines(lines)
