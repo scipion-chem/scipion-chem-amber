@@ -354,7 +354,7 @@ class AmberSystemPrep(EMProtocol):
         else:
             print("Processing manual disulfide configuration...")
             originalPdb = self._getExtraPath(f'{self.getSystemName()}.pdb')
-            manual_bonds = self._applyManualDisulfideBridges(
+            manual_bonds = self.applyManualDisulfideBridges(
                 originalPdb=os.path.abspath(originalPdb),
                 amberPdb=inputStructure,
                 manualBridgesStr=self.disulfideBridgesNumber.get(),
@@ -1041,160 +1041,146 @@ class AmberSystemPrep(EMProtocol):
 
         return outputPDB
 
-    def renameCysToCyx(self, pdbFile, disulfideStr):
-        """Compactly parse bond string and update PDB CYS -> CYX inline."""
-        if not disulfideStr:
-            return
-
-        # Set comprehension to instantly build a lookup of (chain, resNum)
-        targets = {
-            (res.split('_')[0], int(res.split('_')[1]))
-            for pair in disulfideStr.split('/') if pair
-            for res in pair.split('-')
-        }
-
-        with open(pdbFile, 'r') as f:
-            lines = f.readlines()
-
-        with open(pdbFile, 'w') as f:
-            for l in lines:
-                if l.startswith(('ATOM', 'HETATM')) and l[17:20].strip() == 'CYS':
-                    chain, resNum = l[21].strip() or '_', l[22:26].strip()
-                    if resNum.replace('-', '').isdigit() and (chain, int(resNum)) in targets:
-                        l = l[:17] + 'CYX' + l[20:]  # Modify only residue name
-                f.write(l)
-
-    def extractSSBonds(self, pdbFile, unitName="PROT"):
+    def applyManualDisulfideBridges(self, originalPdb, amberPdb, manualBridgesStr, unitName="PROT"):
         """
-        Extracts disulfide bonds from PDB CONECT lines and formats them for tleap.
+        Map original PDB residue numbering to AMBER numbering, set CYX/CYS correctly,
+        and generate tleap bond commands for manual disulfide bridges.
+
+        Args:
+            originalPdb: Path to original PDB (unused, kept for compatibility)
+            amberPdb: Path to AMBER-prepared PDB file (modified in place)
+            manualBridgesStr: Bridge specification of the wizard "A_3-A_40/A_4-A_32"
+            unitName: Tleap unit name (default "PROT")
+
+        Returns:
+            list: Tleap bond command strings
         """
-        atom_to_res = {}
-        conect_pairs = []
+        # Step 1: Parse bridge specification
+        requestedRes, requestedPairs = self._parseManualBridges(manualBridgesStr)
 
-        with open(pdbFile, 'r') as f:
-            for line in f:
-                if line.startswith(('ATOM', 'HETATM')):
-                    try:
-                        # Extract Atom Serial (7-11) and Residue Number (23-26)
-                        atom_serial = int(line[6:11].strip())
-                        res_num = int(line[22:26].strip())
-                        atom_name = line[12:16].strip()
-                        atom_to_res[atom_serial] = (res_num, atom_name)
-                    except ValueError:
-                        continue
-                elif line.startswith('CONECT'):
-                    parts = line.split()
-                    if len(parts) >= 3:
-                        try:
-                            # Extract the atom serials
-                            atom1, atom2 = int(parts[1]), int(parts[2])
-                            conect_pairs.append((atom1, atom2))
-                        except ValueError:
-                            continue
+        # Step 2: Read renumbering mapping
+        renumFile = os.path.join(self.getTargetFileDir(), f'{getBaseName(originalPdb)}_amber_renum.txt')
+        orig2amber = self._readRenumberingFile(renumFile)
 
-        tleap_commands = []
-        for a1, a2 in conect_pairs:
-            if a1 in atom_to_res and a2 in atom_to_res:
-                res1_num, name1 = atom_to_res[a1]
-                res2_num, name2 = atom_to_res[a2]
+        # Step 3: Convert to amber residue IDs
+        requestedAmberSet = self._buildRequestedAmberSet(requestedRes, orig2amber)
 
-                # Sanity check: Ensure we are bonding Sulfurs
-                if name1.startswith('S') and name2.startswith('S'):
-                    tleap_commands.append(f"bond {unitName}.{res1_num}.{name1} {unitName}.{res2_num}.{name2}")
+        # Step 4: Rewrite PDB with correct CYX/CYS naming
+        self._rewritePdbWithCysteine(amberPdb, requestedAmberSet)
 
-        return tleap_commands
-
-    def _applyManualDisulfideBridges(self, originalPdb, amberPdb, manualBridgesStr, unitName="PROT"):
-        """
-        Maps original PDB residue numbering to sequential amber numbering,
-        forces requested residues to CYX (and resets unrequested ones to CYS),
-        and returns the explicit tleap bond commands.
-        """
-        # 1. Parse manual selection string (e.g., "A_3-A_40/A_4-A_32")
-        # Build a set of target residues in the original format: {("A", 3), ("A", 40), ...}
-        requested_orig_residues = set()
-        requested_pairs = []
-        for pair in manualBridgesStr.split('/'):
-            if '-' in pair:
-                try:
-                    r1, r2 = pair.split('-')
-                    c1, n1 = r1.split('_')
-                    c2, n2 = r2.split('_')
-                    requested_orig_residues.add((c1, int(n1)))
-                    requested_orig_residues.add((c2, int(n2)))
-                    requested_pairs.append(((c1, int(n1)), (c2, int(n2))))
-                except ValueError:
-                    continue
-
-        # 2. Map Original Residues -> Amber Residues using CA/C/N backbone coordinates
-        # (This is bulletproof against renumbering, gaps, and missing sidechains)
-        orig_backbones = {}  # (x, y, z) -> (chain, resNum)
-        with open(originalPdb, 'r') as f:
-            for line in f:
-                if line.startswith(('ATOM')) and line[12:16].strip() in ['CA', 'C', 'N']:
-                    chain = line[21].strip() or '_'
-                    try:
-                        res_num = int(line[22:26].strip())
-                        x, y, z = float(line[30:38]), float(line[38:46]), float(line[46:54])
-                        orig_backbones[(round(x, 2), round(y, 2), round(z, 2))] = (chain, res_num)
-                    except ValueError:
-                        continue
-
-        orig_to_amber_map = {}  # Tuple(chain, orig_resNum) -> amber_resNum
-        with open(amberPdb, 'r') as f:
-            for line in f:
-                if line.startswith(('ATOM', 'HETATM')) and line[12:16].strip() in ['CA', 'C', 'N']:
-                    try:
-                        amber_res = int(line[22:26].strip())
-                        x, y, z = float(line[30:38]), float(line[38:46]), float(line[46:54])
-                        coord_key = (round(x, 2), round(y, 2), round(z, 2))
-
-                        if coord_key in orig_backbones:
-                            orig_key = orig_backbones[coord_key]
-                            orig_to_amber_map[orig_key] = amber_res
-                    except ValueError:
-                        continue
-
-        # 3. Rewrite _amber.pdb: Enforce CYX/CYS and strip ALL CONECT lines
-        clean_lines = []
-        with open(amberPdb, 'r') as f:
-            for line in f:
-                if line.startswith(('ATOM', 'HETATM')):
-                    res_name = line[17:20].strip()
-                    if res_name in ['CYS', 'CYX']:
-                        try:
-                            amber_res = int(line[22:26].strip())
-                            # Find if this amber residue maps back to a manually requested original residue
-                            is_requested = False
-                            for orig_key, amb_res in orig_to_amber_map.items():
-                                if amb_res == amber_res and orig_key in requested_orig_residues:
-                                    is_requested = True
-                                    break
-
-                            # Enforce CYX for requested, reset to CYS for everything else
-                            target_res_name = 'CYX' if is_requested else 'CYS'
-                            if res_name != target_res_name:
-                                line = line[:17] + target_res_name + line[20:]
-                        except ValueError:
-                            pass
-                    clean_lines.append(line)
-                elif line.startswith('CONECT'):
-                    # Strip out automated CONECT records entirely so they don't fight manual settings
-                    continue
-                else:
-                    clean_lines.append(line)
-
-        with open(amberPdb, 'w') as f:
-            f.writelines(clean_lines)
-
-        # 4. Generate explicit tleap bond commands using the translated amber residue IDs
-        tleap_bonds = []
-        for orig1, orig2 in requested_pairs:
-            if orig1 in orig_to_amber_map and orig2 in orig_to_amber_map:
-                amb1 = orig_to_amber_map[orig1]
-                amb2 = orig_to_amber_map[orig2]
-                tleap_bonds.append(f"bond {unitName}.{amb1}.SG {unitName}.{amb2}.SG")
+        # Step 5: Generate tleap bond commands
+        amberPairs = []
+        for orig1, orig2 in requestedPairs:
+            if orig1 in orig2amber and orig2 in orig2amber:
+                amberPairs.append((orig2amber[orig1], orig2amber[orig2]))
             else:
-                print(f"WARNING: Could not map manual bridge pair {orig1} - {orig2} to Amber topology.")
+                print(f"WARNING: Original pair {orig1[0]}_{orig1[1]} - {orig2[0]}_{orig2[1]} not found in mapping, skipping.")
+        tleap_bonds = self._generateTleapBonds(amberPairs, unitName)
 
         return tleap_bonds
+
+    def _parseManualBridges(self, manualBridgesStr):
+        """
+        Parse bridge specification string into residue sets and pairs.
+        """
+        requestedRes = set()
+        requestedPairs = []
+
+        for pair in manualBridgesStr.split('/'):
+            if '-' not in pair:
+                continue
+
+            try:
+                r1, r2 = pair.split('-')
+                c1, n1 = r1.split('_')
+                c2, n2 = r2.split('_')
+
+                res1 = (c1, int(n1))
+                res2 = (c2, int(n2))
+
+                requestedRes.add(res1)
+                requestedRes.add(res2)
+                requestedPairs.append((res1, res2))
+            except ValueError:
+                print(f"WARNING: Could not parse bridge pair '{pair}', skipping")
+                continue
+
+        return requestedRes, requestedPairs
+
+    def _readRenumberingFile(self, renumFile):
+        """
+        Read amber_renum.txt and build original -> amber mapping.
+        Returns: dict: {(chain, orig_num): amber_num, ...}
+        """
+        orig2amber = {}
+
+        with open(renumFile, 'r') as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) < 5:
+                    continue
+
+                origChain = parts[1]
+                origNum = int(parts[2])
+                amberNum = int(parts[4])
+                orig2amber[(origChain, origNum)] = amberNum
+                continue
+
+        return orig2amber
+
+    def _buildRequestedAmberSet(self, requestedRes, orig2amber):
+        """
+        Convert original residue IDs to amber residue IDs.
+        Returns: set: {amber_num1, amber_num2, ...}
+        """
+        requestedAmber = set()
+
+        for origKey in requestedRes:
+            if origKey in orig2amber:
+                amberNum = orig2amber[origKey]
+                requestedAmber.add(amberNum)
+
+        return requestedAmber
+
+    def _rewritePdbWithCysteine(self, amberPdb, requestedAmberSet):
+        """
+        Rewrite AMBER PDB: set CYX for requested cysteines, CYS for others.
+        Strip all CONECT records to avoid conflicts.
+        """
+        cleanLines = []
+
+        with open(amberPdb, 'r') as f:
+            for line in f:
+                if line.startswith('CONECT'):
+                    continue
+
+                if line.startswith(('ATOM', 'HETATM')):
+                    resName = line[17:20].strip()
+                    if resName in ['CYS', 'CYX']:
+                        try:
+                            amberRes = int(line[22:26].strip())
+                            isRequested = amberRes in requestedAmberSet
+                            targetName = 'CYX' if isRequested else 'CYS'
+
+                            if resName != targetName:
+                                line = line[:17] + targetName + line[20:]
+                        except ValueError:
+                            pass
+
+                cleanLines.append(line)
+
+        with open(amberPdb, 'w') as f:
+            f.writelines(cleanLines)
+
+    def _generateTleapBonds(self, amber_pairs, unitName="PROT"):
+        """
+        Generate tleap bond commands for disulfide bridges using AMBER residue IDs.
+        Returns: list: Tleap bond command strings
+        """
+        tleapBonds = []
+
+        for amb1, amb2 in amber_pairs:
+            bond_cmd = f"bond {unitName}.{amb1}.SG {unitName}.{amb2}.SG"
+            tleapBonds.append(bond_cmd)
+
+        return tleapBonds
