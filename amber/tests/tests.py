@@ -49,16 +49,14 @@ class TestAmberPrepareSystem(BaseTest):
         cls.ds = DataSet.getDataSet('model_building_tutorial')
         setupTestProject(cls)
         cls._runImportPDB()
-        cls._waitOutput(cls.protImportPDB, 'outputPdb', sleepTime=5)
 
     @classmethod
     def _runImportPDB(cls):
-        protImportPDB = cls.newProtocol(
+        cls.protImportPDB = cls.newProtocol(
             ProtImportPdb,
             inputPdbData=1,
             pdbFile=cls.ds.getFile('PDBx_mmCIF/1ake_mut1.pdb'))
-
-        cls.protImportPDB = cls.launchProtocol(protImportPDB, waitForOutput=['outputPdb'])
+        cls.launchProtocol(cls.protImportPDB)  # synchronous, no wait=False
 
     @classmethod
     def _runPrepareSystem(cls):
@@ -214,25 +212,3 @@ class TestAmberLigSimulation(TestAmberPrepareSystemLig):
         protSim = self._runSimulation(protPrepare)
         self._waitOutput(protSim, 'outputSystem', sleepTime=10)
         self.assertIsNotNone(getattr(protSim, 'outputSystem', None))
-
-# class TestAmberMembSimulation(TestAmberPrepareSystemMembrane):
-#
-#     def _runSimulation(self, protPrepare):
-#         protSim = self.newProtocol(
-#             AmberMDSimulation,
-#             amberSystem=protPrepare.outputSystem, workFlowSteps=LONGTEST)
-#         protSim.setObjLabel('amber - pmemd MD sim')
-#
-#         self.launchProtocol(protSim)
-#         return protSim
-#
-#     def test(self):
-#         protExtract = self._runExtractLigand(self.protImportPDB)
-#         self._waitOutput(protExtract, 'outputSmallMolecules')
-#
-#         protPrepare = self._runPrepareSystem(protExtract, inputFrom=LIGAND)
-#         self._waitOutput(protPrepare, 'outputSystem', sleepTime=10)
-#
-#         protSim = self._runSimulation(protPrepare)
-#         self._waitOutput(protSim, 'outputSystem', sleepTime=10)
-#         self.assertIsNotNone(getattr(protSim, 'outputSystem', None))
