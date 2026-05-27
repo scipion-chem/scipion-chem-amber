@@ -53,11 +53,12 @@ class TestAmberPrepareSystem(BaseTest):
 
     @classmethod
     def _runImportPDB(cls):
-        cls.protImportPDB = cls.newProtocol(
+        protImportPDB = cls.newProtocol(
             ProtImportPdb,
             inputPdbData=1,
             pdbFile=cls.ds.getFile('PDBx_mmCIF/1ake_mut1.pdb'))
-        cls.proj.launchProtocol(cls.protImportPDB)
+
+        cls.protImportPDB = cls.launchProtocol(protImportPDB, waitForOutput=['outputPdb'])
 
     @classmethod
     def _runPrepareSystem(cls):
