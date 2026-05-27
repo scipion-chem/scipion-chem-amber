@@ -57,7 +57,7 @@ class TestAmberPrepareSystem(BaseTest):
             ProtImportPdb,
             inputPdbData=1,
             pdbFile=cls.ds.getFile('PDBx_mmCIF/1ake_mut1.pdb'))
-        cls.proj.launchProtocol(cls.protImportPDB, wait=False)
+        cls.proj.launchProtocol(cls.protImportPDB)
 
     @classmethod
     def _runPrepareSystem(cls):
@@ -99,7 +99,7 @@ class TestAmberPrepareSystemLig(TestPrepareReceptor, TestExtractLigand):
         protExtLig.inputStructure.set(inputProt)
         protExtLig.inputStructure.setExtended('outputPdb')
 
-        cls.proj.launchProtocol(protExtLig)
+        cls.launchProtocol(protExtLig)
         cls.protExtLig = protExtLig
         return protExtLig
 
