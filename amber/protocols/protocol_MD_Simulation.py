@@ -28,12 +28,15 @@
 This module will perform energy minimizations and equilibrium for the system befor MD simultion
 """
 import os, glob, shutil
+from os.path import relpath
 
+from pyworkflow.mapper.sqlite import SELF
 from pyworkflow.protocol import params
 from pyworkflow.utils import Message, runJob, createLink
 
 import amber
 from pwem.protocols import EMProtocol
+from pwem.objects import AtomStruct
 
 from pwchem.utils import natural_sort
 
@@ -127,8 +130,12 @@ class AmberMDSimulation(EMProtocol):
                       help='Number of MD steps in run (x * time step = run length in ps)')
         line.addParam('heatTimeStep', params.FloatParam, default=0.002,
                       label='Time step (ps)')
-        line.addParam('heatTraj', params.IntParam, default=1000,
-                      label='Trajectory step size', help='The coordinates are written to a mdcrd file x times.')
+        group.addParam('heatSaveTrj', params.BooleanParam, default=False,
+                       label='Save trajectory: ',
+                       help='Save trajectory coordinates during the heating stage.')
+        group.addParam('heatTraj', params.IntParam, default=1000,
+                       label='Trajectory step size', condition='heatSaveTrj',
+                       help='The coordinates are written to a mdcrd file every x steps.')
 
         line = group.addLine('Temperature increase: ',
                              help='Initial and final temperature (K)')
@@ -174,9 +181,12 @@ class AmberMDSimulation(EMProtocol):
                       help='Number of MD steps in run (nstlim * dt = run length in ps)')
         line.addParam('simTimeStep', params.FloatParam, default=0.002,
                       label='Time step (ps)')
-        line.addParam('simTrajStep', params.IntParam, default=1000,
-                      label='Trajectory step size',
-                      help='The trajectory coordinates are written to a traj file every x steps.')
+        group.addParam('simSaveTrj', params.BooleanParam, default=True,
+                       label='Save trajectory: ',
+                       help='Save trajectory coordinates during the simulation stage.')
+        group.addParam('simTrajStep', params.IntParam, default=1000,
+                       label='Trajectory step size', condition='simSaveTrj',
+                       help='The trajectory coordinates are written to a traj file every x steps.')
 
         group.addParam('simEnsemType', params.EnumParam,
                        label='Simulation type: ',
@@ -235,7 +245,7 @@ class AmberMDSimulation(EMProtocol):
                        help='Summary of the defined steps. \nManual modification will have no '
                             'effect, use the wizards to add / delete the steps')
         group.addParam('deleteStep', params.StringParam, default='',
-                       label='Delete relaxation step number: ',
+                       label='Delete step number: ',
                        help='Delete the step of the specified index from the workflow.')
         # group.addParam('watchStep', params.StringParam, default='',
         #                label='Watch relaxation step number: ',
@@ -271,35 +281,44 @@ class AmberMDSimulation(EMProtocol):
         self.createGUISummary()
         i = 1
         for wStep in self.workFlowSteps.get().strip().split('\n'):
-            self._insertFunctionStep('simulateStageStep', wStep, i)
+            self._insertFunctionStep(self.simulateStageStep, wStep, i)
             i += 1
 
-        self._insertFunctionStep('createOutputStep')
+        self._insertFunctionStep(self.createOutputStep)
 
     def simulateStageStep(self, wStep, i):
         msjDic = eval(wStep)
         mdpFile = self.generateMDPFile(msjDic, str(i))
-        self.callAmber(mdpFile)
+        self.callAmber(mdpFile, saveTrj=self.shouldSaveTrj(msjDic))
 
     def createOutputStep(self):
         lastCrdFile, lastTopoFile, lastOutFile = self.getPrevFinishedStageFiles()
         oriSystemFile = self.amberSystem.get().getSystemFile()
+        ligTopFile = self.amberSystem.get().getLigTopologyFile()
+        ligID = self.amberSystem.get().getLigandID()
 
         localCrdFile, localTopFile = self._getPath('outputSystem.rst7'), self._getPath('systemTopology.parm7')
         shutil.copyfile(lastCrdFile, localCrdFile), shutil.copyfile(lastTopoFile, localTopFile)
 
         mFF, wFF = self.getFFFiles()
 
-        outSystem = AmberSystem(filename=oriSystemFile, ff=mFF, wff=wFF, nTime=self.calculateTotalSimTime())
+        outSystem = AmberSystem(filename=relpath(oriSystemFile), ff=mFF, wff=wFF, nTime=self.calculateTotalSimTime(),
+                                ligTopFile=ligTopFile, ligName=ligID)
+
         outSystem.setTopologyFile(localTopFile)
         outSystem.setCrdFile(localCrdFile)
 
-        outputTrajectory = self._getPath('outputTrajectory.nc')
         concatTrjFile = self.prepareSimTrj()
-        shutil.copyfile(concatTrjFile, outputTrajectory)
-        outSystem.setTrajectoryFile(outputTrajectory)
+        if concatTrjFile is not None:
+            outputTrajectory = self._getPath('outputTrajectory.nc')
+            shutil.copyfile(concatTrjFile, outputTrajectory)
+            outSystem.setTrajectoryFile(outputTrajectory)
+            outSystem.readTrjInfo(protocol=self, nTime=self.calculateSavedTrjTime(),
+                                  outDir=self._getExtraPath())
 
-        self._defineOutputs(outputSystem=outSystem)
+        finalPdbFile = self.crdToPDB(localCrdFile, localTopFile)
+        finalAtomStruct = AtomStruct(filename=relpath(finalPdbFile))
+        self._defineOutputs(outputSystem=outSystem, lastFrameStruct=finalAtomStruct)
 
     # --------------------------- INFO functions -----------------------------------
     def _summary(self):
@@ -339,12 +358,16 @@ class AmberMDSimulation(EMProtocol):
                 nTime = msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.002)
                 lastTemp = msjDic.get('FiTemp', 300)
                 lineText += f"Sim. time: {nTime} ps, NVT ensemble, {msjDic.get('InTemp', 0)} K to {lastTemp} K"
+                if not self.shouldSaveTrj(msjDic):
+                    lineText += ', trajectory not saved'
                 if msjDic.get('Restraint'):
                     lineText += f", restraint on {msjDic.get('RestrAtoms')}"
 
             elif stepType == 'Simulation':  # Simulation
                 nTime = msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.002)
                 lineText += f"Sim. time: {nTime} ps, {msjDic.get('EnsemType', 'NPT')} ensemble, {lastTemp} K"
+                if not self.shouldSaveTrj(msjDic):
+                    lineText += ', trajectory not saved'
                 if msjDic.get('Restraint'):
                     lineText += f", restraint on {msjDic.get('RestrAtoms')}"
 
@@ -425,6 +448,14 @@ class AmberMDSimulation(EMProtocol):
 
         return mdpFile
 
+    def shouldSaveTrj(self, msjDic):
+        """Return whether a workflow step should write a trajectory file.
+
+        Old workflow dictionaries do not contain SaveTrj. Treat them as True
+        to preserve the previous Amber protocol behavior.
+        """
+        return msjDic.get('SaveTrj', True)
+
     def generateMDPFile(self, msjDic, i):
         '''Generate .in file'''
         stepType = msjDic['stepType']
@@ -456,7 +487,7 @@ class AmberMDSimulation(EMProtocol):
                                        msjDic['InTemp'],
                                        msjDic['FiTemp'],
                                        msjDic['Traj'],
-                                       msjDic['Traj'])
+                                       msjDic['Traj'] if self.shouldSaveTrj(msjDic) else 0)
             params += self.addThermostatParams(msjDic)
             if msjDic['Restraint']:
                 params += ", ntr=1, restraint_wt={}, restraintmask='{}' ".format(msjDic['RestrForce'],
@@ -476,7 +507,7 @@ class AmberMDSimulation(EMProtocol):
                                       msjDic['TimeStep'],
                                       self.getLastHeatingTemp(),
                                       msjDic['TrajStep'],
-                                      msjDic['TrajStep'])
+                                      msjDic['TrajStep'] if self.shouldSaveTrj(msjDic) else 0)
             params += self.addThermostatParams(msjDic)
             if msjDic['EnsemType'] == 'NPT':
                 params += self.addBarostatParams(msjDic)
@@ -573,13 +604,17 @@ class AmberMDSimulation(EMProtocol):
                       ' -inf {}.inf'.format(inputFile, crdFile, topFile, crdFile, *[stage] * 4)
         elif stageType == 'Heating':
             command = '-i {} -c {} -p {} -ref {} -r {}.ncrst' \
-                      ' -o {}.o ' \
-                      ' -x {}.netcdf -inf {}.inf'.format(inputFile, crdFile, topFile, crdFile, *[stage] * 5)
+                      ' -o {}.o '.format(inputFile, crdFile, topFile, crdFile, *[stage] * 2)
+            if saveTrj:
+                command += ' -x {}.netcdf'.format(stage)
+            command += ' -inf {}.inf'.format(stage)
 
         elif stageType == 'Simulation':
             command = '-i {} -c {} -p {} -ref {} -r {}.ncrst' \
-                      ' -o {}.o' \
-                      ' -x {}.netcdf -inf {}.inf'.format(inputFile, crdFile, topFile, crdFile, *[stage] * 5)
+                      ' -o {}.o'.format(inputFile, crdFile, topFile, crdFile, *[stage] * 2)
+            if saveTrj:
+                command += ' -x {}.netcdf'.format(stage)
+            command += ' -inf {}.inf'.format(stage)
 
         elif stageType == 'Custom':
             # The .in content determines what sander/pmemd actually runs;
@@ -623,6 +658,28 @@ class AmberMDSimulation(EMProtocol):
 
         return os.path.abspath(crdFile), os.path.abspath(topFile), outFile
 
+    def crdToPDB(self, crdFile, topFile):
+        """Run cpptraj to strip waters and ions and save the coordinates to a PDB file.
+        """
+        systemName = os.path.splitext(os.path.basename(self.amberSystem.get().getSystemFile()))[0]
+        finalPdbFile = self._getPath(f'{systemName}_final.pdb')
+
+        cpptrajCmds = f"""parm {os.path.abspath(topFile)}
+            trajin {os.path.abspath(crdFile)}
+            strip :{ENV_RES}
+            trajout {os.path.abspath(finalPdbFile)} pdb
+            run
+            quit
+            """
+        scriptPath = self._getExtraPath('strip_solvent_cpptraj.in')
+        with open(scriptPath, 'w') as f:
+            f.write(cpptrajCmds)
+
+        cmd = f'-i {os.path.abspath(scriptPath)}'
+        amberPlugin.runAmbertools(self, 'cpptraj', args=cmd, cwd=self._getExtraPath())
+
+        return finalPdbFile
+
     def getFFFiles(self):
         system = self.amberSystem.get()
         return system.getForceField(), system.getWaterForceField()
@@ -652,10 +709,9 @@ class AmberMDSimulation(EMProtocol):
     def prepareSimTrj(self):
         """Concatenate all .netcdf trajectory files from Simulation/Custom stages using cpptraj and wrap atoms
         for visualization"""
-        simDirs = natural_sort(glob.glob(self._getExtraPath('*_Simulation')) +
-                               glob.glob(self._getExtraPath('*_Custom')))
+        simDirs = self.getSavedTrjStageDirs()
         if not simDirs:
-            print("Warning: No Simulation/Custom directories found")
+            print("Warning: No saved Simulation/Custom trajectories found")
             return None
 
         trjFiles = [
@@ -668,7 +724,7 @@ class AmberMDSimulation(EMProtocol):
             return None
 
         outputTrj = os.path.abspath(self._getExtraPath('prepSimulation.nc'))
-        topFile = self.amberSystem.get().getTopologyFile()
+        topFile = os.path.abspath(self.amberSystem.get().getTopologyFile())
         cpptrajInParams = ['autoimage']
         cpptrajInParams.append(f"trajout {outputTrj}")
         cpptrajInParams.append("run")
@@ -685,12 +741,42 @@ class AmberMDSimulation(EMProtocol):
         print("Error: Concatenation failed")
         return None
 
+    def getSavedTrjStageDirs(self):
+        """Return the final contiguous block of Simulation/Custom dirs with saved trajectories."""
+        stageDirs = natural_sort(glob.glob(self._getExtraPath('*_Simulation')) +
+                                 glob.glob(self._getExtraPath('*_Custom')), rev=True)
+        savedStageDirs = []
+        for stageDir in stageDirs:
+            trjFiles = [f for f in os.listdir(stageDir) if f.endswith('.netcdf')]
+            if not trjFiles:
+                break
+            savedStageDirs.append(stageDir)
+        savedStageDirs.reverse()
+        return savedStageDirs
+
+    def calculateSavedTrjTime(self):
+        """Calculate the simulation time represented by the final saved trajectory block."""
+        savedStageNames = {os.path.basename(stageDir) for stageDir in self.getSavedTrjStageDirs()}
+        totalPs = 0.0
+        workSteps = self.workFlowSteps.get()
+
+        for i, dicLine in enumerate(workSteps.split('\n'), start=1):
+            if not dicLine.strip():
+                continue
+
+            msjDic = eval(dicLine)
+            stageName = '{}_{}'.format(i, msjDic.get('stepType'))
+            if stageName in savedStageNames and msjDic.get('stepType') in ['Simulation', 'Custom']:
+                totalPs += msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.0)
+
+        return totalPs
+
     def calculateTotalSimTime(self):
         """
-        Calculates the total simulation time (in ns) by summing
+        Calculates the total simulation time (in ps) by summing
         MDSteps * TimeStep for all production and heating stages.
         """
-        total_ps = 0.0
+        totalPs = 0.0
         workSteps = self.workFlowSteps.get()
 
         for dicLine in workSteps.split('\n'):
@@ -699,9 +785,9 @@ class AmberMDSimulation(EMProtocol):
             msjDic = eval(dicLine)
 
             if msjDic.get('stepType') in ['Simulation', 'Custom']:
-                total_ps += msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.0)
+                totalPs += msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.0)
 
-        return total_ps / 1000.0
+        return totalPs
 
     def getLastHeatingTemp(self):
         """Get the final temperature from the last Heating step in the workflow"""

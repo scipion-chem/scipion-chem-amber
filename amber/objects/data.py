@@ -25,18 +25,18 @@
 # *  e-mail address 'scipion@cnb.csic.es'
 # *
 # **************************************************************************
-import os, shutil
+import os, shutil, re
 from subprocess import check_call
 import pwem.objects.data as data
 import pyworkflow.object as pwobj
 from pwchem.objects import MDSystem
-
+from pyworkflow.object import Float, Integer, String, Object
+from amber import Plugin as amberPlugin
 
 class AmberSystem(MDSystem):
     """A system atom structure (prepared for MD) in the file format of AMBER
    crd : cordinate file .crd
    top : topology file .top
-   check : PDB file to visualize the structure
    """
 
     def __init__(self, filename=None, **kwargs):
@@ -48,8 +48,12 @@ class AmberSystem(MDSystem):
 
     def __str__(self):
         strStr = '{} ({}'.format(self.getClassName(), os.path.basename(self.getSystemFile()))
+
         if self.hasTrajectory():
-            strStr += f', time(ns): {self._nTime.get()}'
+            strStr += ', frames: {}, time(ps): {:.1f}'.format(
+                self.getNFrames(),
+                self.getNTime()
+            )
         strStr += ')'
         return strStr
 
@@ -62,5 +66,56 @@ class AmberSystem(MDSystem):
     def getNFrames(self):
         return self._nFrames.get()
 
+    def setNFrames(self, value):
+        self._nFrames.set(value)
+
     def getNTime(self):
         return self._nTime.get()
+
+    def setNTime(self, value):
+        self._nTime.set(value)
+
+    def getFrameIdxs(self):
+        """Return [firstFrame, lastFrame] as Python ints.
+        Returns [0, 0] if not yet populated.
+        """
+        return [self._firstFrame.get(), self._lastFrame.get()]
+
+    def hasTrjInfo(self):
+        """True only when readTrjInfo has been called and found valid data."""
+        return self._lastFrame.get() > 0
+
+
+    def readTrjInfo(self, protocol, nTime, outDir=None):
+        topFile = os.path.abspath(self.getTopologyFile())
+        trjFile = os.path.abspath(self.getTrajectoryFile())
+
+        nFrames = self._cpptrajGetNFrames(protocol, topFile, trjFile)
+
+        self.setNFrames(nFrames)
+        self.setNTime(nTime)
+
+
+    # ── helpers ─────────────────────────────
+
+    def _cpptrajGetNFrames(self, protocol, topFile, trjFile):
+        """
+        Run ``cpptraj -p <top> -y <traj> -tl`` and parse ``Frames: <N>``
+        from STDOUT.  Returns None if parsing fails.
+        """
+        args = '-p {} -y {} -tl'.format(topFile, trjFile)
+        amberPlugin.runAmbertools(protocol, program='cpptraj',
+                                    args=args)
+
+        for logName in ('run.stdout', 'run.stderr'):
+            candidate = protocol._getPath('logs', logName)
+            if os.path.exists(candidate):
+                with open(candidate) as fh:
+                    for line in fh:
+                        m = re.search(r'Frames:\s*(\d+)', line)
+                        if m:
+                            nFrames = int(m.group(1))
+                            break
+                break
+
+        return nFrames
