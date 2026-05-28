@@ -29,6 +29,9 @@
 import os
 import tkinter as tk
 from tkinter import messagebox
+from pyworkflow.gui import ListTreeProviderString, dialog
+from pwem.objects import Pointer, String
+
 from pwchem.wizards import DeleteElementWizard, VariableWizard, WatchElementWizard
 from pwchem.utils import cifFromASFile
 
@@ -166,42 +169,36 @@ class DisulfideBondWizard(VariableWizard):
     """Wizard to select multiple pairs of CYS residues for disulfide bond creation"""
     _targets, _inputs, _outputs = [], {}, {}
 
-    def parseCysResidues(self, inputFile, protocol):
-        """Parse PDB/mmCIF file and return CYS residues grouped by chain
-        Returns: {chainName: [(resIdx, resName), ...], ...}
+    def parseCysPairs(self, inputFile, protocol):
+        """Parse PDB/mmCIF file and return CYS pairs whose SG atoms are 1.5–2.5 Å apart
+        (typical disulfide bond distance ~2.05 Å).
+
+        Returns: [((chainA, resIdxA, resNameA), (chainB, resIdxB, resNameB)), ...]
         Standardizes any input to mmCIF format using pwem utilities before parsing.
         """
-        cysDict = {}
+        # key: (chainId, resIdx) -> (x, y, z)
+        sgCoords = {}
 
-        # 1. FIX: Use .cif extension for the temporary file instead of .pdb
         base, _ = os.path.splitext(os.path.basename(inputFile))
         tmpCifPath = os.path.abspath(protocol.getProject().getTmpPath(f'{base}_temp.cif'))
 
-        # Convert/copy input to mmCIF
         cifFile = cifFromASFile(inputFile, tmpCifPath)
-
         if not cifFile or not os.path.exists(cifFile):
             print(f"ERROR: Conversion failed or mmCIF file missing: {cifFile}")
-            return {}
+            return []
 
         with open(cifFile, 'r') as f:
             for line in f:
-                # Standard mmCIF coordinate rows start with ATOM or HETATM tokens
                 if not line.startswith(('ATOM', 'HETATM')):
                     continue
 
                 try:
                     parts = line.split()
-                    if len(parts) < 10:
+                    if len(parts) < 13:
                         continue
-
-                    # 2. FIX: Extract the variables from standard mmCIF columns
-                    # parts[5] = Residue Name (e.g., CYS)
-                    # parts[6] = Chain ID (e.g., A)
-                    # parts[8] = Sequence Index / Residue Number (e.g., 14)
-
-                    resName = parts[5].strip()
-                    if resName != 'CYS':
+                    if parts[5].strip() != 'CYS':
+                        continue
+                    if parts[3].strip() != 'SG':  # only the sulfur atom
                         continue
 
                     chainId = parts[6].strip()
@@ -211,193 +208,44 @@ class DisulfideBondWizard(VariableWizard):
                     resNumStr = parts[8].strip()
                     if not resNumStr or not resNumStr.replace('-', '').isdigit():
                         continue
+
                     resIdx = int(resNumStr)
+                    x, y, z = float(parts[10]), float(parts[11]), float(parts[12])
 
-                    # Add to dictionary
-                    if chainId not in cysDict:
-                        cysDict[chainId] = set()
-
-                    cysDict[chainId].add((resIdx, resName))
+                    sgCoords[(chainId, resIdx)] = (x, y, z)
 
                 except (ValueError, IndexError) as e:
                     print(f"WARNING: Could not parse line: {line.rstrip()}\n  Error: {e}")
                     continue
 
-        # 3. FIX: Safe cleanup. ONLY delete if it's the temporary file we created
         if cifFile == tmpCifPath and os.path.exists(tmpCifPath):
             try:
                 os.remove(tmpCifPath)
             except OSError:
                 pass
 
-        # Sort values sequentially by residue index per chain
-        for chain in cysDict:
-            cysDict[chain] = sorted(list(cysDict[chain]), key=lambda x: x[0])
+        # Pairwise SG–SG distance filter (1.5–2.5 Å = disulfide bond range)
+        pairs = []
+        keys = list(sgCoords.keys())
+        for i in range(len(keys)):
+            for j in range(i + 1, len(keys)):
+                kA, kB = keys[i], keys[j]
+                xA, yA, zA = sgCoords[kA]
+                xB, yB, zB = sgCoords[kB]
+                dist = ((xA - xB) ** 2 + (yA - yB) ** 2 + (zA - zB) ** 2) ** 0.5
+                if 1.5 <= dist <= 2.5:
+                    chainA, resIdxA = kA
+                    chainB, resIdxB = kB
+                    pairs.append((
+                        (chainA, resIdxA, 'CYS'),
+                        (chainB, resIdxB, 'CYS'),
+                    ))
 
-        return cysDict
+        return pairs
 
-    def createSelectionDialog(self, cysDict, protocol):
-        """Create dialog with two tables for CYS selection and a list for multiple bonds"""
-
-        dialog = tk.Toplevel()
-        dialog.title("Select Disulfide Bond Residues")
-        dialog.geometry("850x750")  # Slightly taller to accommodate the new listbox
-
-        mainFrame = tk.Frame(dialog)
-        mainFrame.pack(fill='both', expand=True, padx=10, pady=10)
-
-        instrLabel = tk.Label(mainFrame,
-                              text="1. Select one CYS from each table.\n2. Click 'Add Bond' to save the pair.\n3. Click OK when finished.",
-                              font=('Arial', 10, 'bold'), justify='left')
-        instrLabel.pack(pady=(0, 10), anchor='w')
-
-        # --- TABLES FRAME ---
-        tablesFrame = tk.Frame(mainFrame)
-        tablesFrame.pack(fill='both', expand=True)
-
-        # Left panel
-        leftFrame = tk.Frame(tablesFrame)
-        leftFrame.pack(side='left', fill='both', expand=True, padx=(0, 5))
-        tk.Label(leftFrame, text="First CYS Residue", font=('Arial', 9, 'bold')).pack()
-
-        self.leftTree = ttk.Treeview(leftFrame, columns=('Chain', 'Residue', 'Name'), show='headings',
-                                     selectmode='browse')
-        for col in ('Chain', 'Residue', 'Name'):
-            self.leftTree.heading(col, text=col)
-            self.leftTree.column(col, width=80, anchor='center')
-
-        leftScrollbar = ttk.Scrollbar(leftFrame, orient='vertical', command=self.leftTree.yview)
-        self.leftTree.configure(yscrollcommand=leftScrollbar.set)
-        self.leftTree.pack(side='left', fill='both', expand=True)
-        leftScrollbar.pack(side='right', fill='y')
-
-        # Right panel
-        rightFrame = tk.Frame(tablesFrame)
-        rightFrame.pack(side='right', fill='both', expand=True, padx=(5, 0))
-        tk.Label(rightFrame, text="Second CYS Residue", font=('Arial', 9, 'bold')).pack()
-
-        self.rightTree = ttk.Treeview(rightFrame, columns=('Chain', 'Residue', 'Name'), show='headings',
-                                      selectmode='browse')
-        for col in ('Chain', 'Residue', 'Name'):
-            self.rightTree.heading(col, text=col)
-            self.rightTree.column(col, width=80, anchor='center')
-
-        rightScrollbar = ttk.Scrollbar(rightFrame, orient='vertical', command=self.rightTree.yview)
-        self.rightTree.configure(yscrollcommand=rightScrollbar.set)
-        self.rightTree.pack(side='left', fill='both', expand=True)
-        rightScrollbar.pack(side='right', fill='y')
-
-        # Populate trees
-        for chain in sorted(cysDict.keys()):
-            for resIdx, resName in cysDict[chain]:
-                values = (chain, resIdx, resName)
-                self.leftTree.insert('', 'end', values=values)
-                self.rightTree.insert('', 'end', values=values)
-
-        # --- ADD BUTTON & SELECTION DISPLAY ---
-        selectionFrame = tk.Frame(mainFrame)
-        selectionFrame.pack(fill='x', pady=10)
-
-        self.selectionLabel = tk.Label(selectionFrame, text="Current Selection: None - None", font=('Arial', 10))
-        self.selectionLabel.pack()
-
-        self.leftTree.bind('<<TreeviewSelect>>', self.updateSelection)
-        self.rightTree.bind('<<TreeviewSelect>>', self.updateSelection)
-
-        # The list to store formatted bond strings
-        self.addedBonds = []
-
-        def onAddBond():
-            leftSelection = self.leftTree.selection()
-            rightSelection = self.rightTree.selection()
-
-            if leftSelection and rightSelection:
-                leftItem = self.leftTree.item(leftSelection[0])
-                rightItem = self.rightTree.item(rightSelection[0])
-
-                bond = f"{leftItem['values'][0]}_{leftItem['values'][1]}-{rightItem['values'][0]}_{rightItem['values'][1]}"
-                reverse_bond = f"{rightItem['values'][0]}_{rightItem['values'][1]}-{leftItem['values'][0]}_{leftItem['values'][1]}"
-
-                # Prevent duplicates (checking both directions A-B and B-A)
-                if bond in self.addedBonds or reverse_bond in self.addedBonds:
-                    messagebox.showinfo("Duplicate", "This disulfide bond has already been added.")
-                elif leftItem['values'] == rightItem['values']:
-                    messagebox.showwarning("Invalid Bond", "Cannot bond a residue to itself.")
-                else:
-                    self.addedBonds.append(bond)
-                    self.bondsListbox.insert(tk.END, bond)
-            else:
-                messagebox.showwarning("Incomplete Selection", "Please select one residue from each table first.")
-
-        addBtn = tk.Button(selectionFrame, text="↓ Add Selected Bond ↓", command=onAddBond, width=25, bg='#e0e0e0',
-                           font=('Arial', 9, 'bold'))
-        addBtn.pack(pady=5)
-
-        # --- LISTBOX FOR ADDED BONDS ---
-        listFrame = tk.Frame(mainFrame)
-        listFrame.pack(fill='both', expand=True, pady=5)
-
-        tk.Label(listFrame, text="Added Disulfide Bonds:", font=('Arial', 9, 'bold')).pack(
-            anchor='w')
-
-        self.bondsListbox = tk.Listbox(listFrame, height=6, font=('Courier', 10))
-        self.bondsListbox.pack(side='left', fill='both', expand=True)
-
-        listScroll = ttk.Scrollbar(listFrame, orient='vertical', command=self.bondsListbox.yview)
-        self.bondsListbox.configure(yscrollcommand=listScroll.set)
-        listScroll.pack(side='right', fill='y')
-
-        def onRemoveBond():
-            selection = self.bondsListbox.curselection()
-            if selection:
-                idx = selection[0]
-                self.bondsListbox.delete(idx)
-                self.addedBonds.pop(idx)
-
-        removeBtn = tk.Button(mainFrame, text="Remove Selected from List", command=onRemoveBond)
-        removeBtn.pack(anchor='e')
-
-        # --- OK / CANCEL BUTTONS ---
-        buttonFrame = tk.Frame(mainFrame)
-        buttonFrame.pack(pady=15)
-
-        self.finalBondString = None
-
-        def onOk():
-            if not self.addedBonds:
-                if not messagebox.askyesno("No Bonds", "No bonds have been added. Proceed with empty selection?"):
-                    return
-                self.finalBondString = ""
-            else:
-                # This joins the list with a forward slash: A_25-A_29/B_25-B_54
-                self.finalBondString = "/".join(self.addedBonds)
-            dialog.destroy()
-
-        def onCancel():
-            self.finalBondString = None
-            dialog.destroy()
-
-        okButton = tk.Button(buttonFrame, text="OK", command=onOk, width=12, font=('Arial', 9, 'bold'))
-        okButton.pack(side='left', padx=10)
-
-        cancelButton = tk.Button(buttonFrame, text="Cancel", command=onCancel, width=12)
-        cancelButton.pack(side='left', padx=10)
-
-        dialog.transient()
-        dialog.grab_set()
-        dialog.wait_window()
-
-        return self.finalBondString
-
-    def updateSelection(self, event=None):
-        """Update the label showing what is currently highlighted in the trees"""
-        leftSelection = self.leftTree.selection()
-        rightSelection = self.rightTree.selection()
-
-        left_text = f"{self.leftTree.item(leftSelection[0])['values'][0]}_{self.leftTree.item(leftSelection[0])['values'][1]}" if leftSelection else "None"
-        right_text = f"{self.rightTree.item(rightSelection[0])['values'][0]}_{self.rightTree.item(rightSelection[0])['values'][1]}" if rightSelection else "None"
-
-        self.selectionLabel.config(text=f"Current Selection: {left_text} - {right_text}")
+    def _pairLabel(self, pair):
+        (chainA, idxA, nameA), (chainB, idxB, nameB) = pair
+        return f"{nameA} {chainA}:{idxA} \u2194 {nameB} {chainB}:{idxB}"
 
     def show(self, form, *params):
         """Main wizard entry point"""
@@ -409,26 +257,40 @@ class DisulfideBondWizard(VariableWizard):
         if hasattr(inputObj, 'getFileName'):
             pdbFile = inputObj.getFileName()
         else:
-            print("ERROR: Could not get PDB file from input object")
+            dialog.showError("Missing Input",
+                         "Please select a valid input structure first.",
+                               form.root)
+
+        cysPairs = self.parseCysPairs(pdbFile, protocol)
+
+        if not cysPairs:
+            dialog.showInfo("Disulfide Bonds",
+                            "No CYS pairs with SG distance in [1.5, 2.5] Å found.",
+                            form.root)
             return
 
-        cysDict = self.parseCysResidues(pdbFile, protocol)
+        pairLabels = [self._pairLabel(p) for p in cysPairs]
+        labelStrings = [String(lbl) for lbl in pairLabels]
 
-        if not cysDict:
-            messagebox.showwarning("No CYS Found", "No cysteine residues found in the structure")
-            return
+        provider = ListTreeProviderString(labelStrings)
+        dlg = dialog.ListDialog(
+            form.root, "Select Disulfide Bonds", provider,
+            "Select which disulfide bonds to form\n"
+            "(Ctrl+Click or Shift+Click for multiple):"
+        )
 
-        # Capture the joined string
-        finalBondString = self.createSelectionDialog(cysDict, protocol)
+        if dlg.values:
+            selectedLabels = {val.get() for val in dlg.values}
 
-        if finalBondString is not None:
-            print(f"Selected disulfide bonds: {finalBondString}")
-            if outputParams:
-                form.setVar(outputParams[0], finalBondString)
-                param = getattr(protocol, outputParams[0])
-                param.set(finalBondString)
-        else:
-            print("Selection cancelled")
+            # Encode each selected pair as "chainA_resIdxA-chain_resIdxB"
+            selectedTokens = []
+            for pair, label in zip(cysPairs, pairLabels):
+                if label in selectedLabels:
+                    (chainA, idxA, _), (chainB, idxB, _) = pair
+                    selectedTokens.append(f"{chainA}_{idxA}-{chainB}_{idxB}")
+
+            if selectedTokens:
+                form.setVar(outputParams[0], '/'.join(selectedTokens))
 
 # Register the Wizard (Update these parameters to match your specific plugin structure)
 DisulfideBondWizard().addTarget(
