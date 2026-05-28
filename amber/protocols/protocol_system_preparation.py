@@ -168,10 +168,10 @@ class AmberSystemPrep(EMProtocol):
                        label='Define S-S bonds', default=0,
                        choices=['Automatic', 'Manual'],
                        help='Automatic:  If a distance SG-SG less than 2.5 Angstrom is found between the SG atoms of two CYS, a disulfide bond is assumed.\n'
-                            'Manual: Define the CYS residues involved in the bonds using the wizard.')
+                            'Manual: Define the CYS pairs to bond using the wizard.')
         group.addParam('disulfideBridgesNumber', params.StringParam,
                        condition='disulfideBridges == 1',
-                       label='Residues involved in the disulfide bridge: \n')
+                       label='Select CYS pairs: \n')
 
         group = form.addGroup('Solvent box')
         group.addParam('solvateStep', params.EnumParam, default=0, condition='tMem==False',

@@ -25,7 +25,6 @@
 # *
 # **************************************************************************
 
-# Imports
 import os
 import tkinter as tk
 from tkinter import messagebox
@@ -104,10 +103,6 @@ DeleteElementWizard().addTarget(protocol=AmberMDSimulation,
                                 inputs=['deleteStep'],
                                 outputs=['workFlowSteps', 'summarySteps'])
 
-# WatchElementWizard().addTarget(protocol=AmberMDSimulation,
-#                                 targets=['watchStep'],
-#                                 inputs=['watchStep'],
-#                                 outputs=['workFlowSteps', 'summarySteps'])
 
 
 class AmberAddDefaultWorkflow(VariableWizard):
@@ -156,13 +151,6 @@ AmberAddDefaultWorkflow().addTarget(protocol=AmberMDSimulation,
                                     targets=['memLigDefault'],
                                     inputs=[''],
                                     outputs=['workFlowSteps', 'summarySteps'])
-
-import tkinter as tk
-import tkinter.ttk as ttk
-from pyworkflow.gui.tree import Tree
-
-import tkinter as tk
-from tkinter import ttk, messagebox
 
 
 class DisulfideBondWizard(VariableWizard):
@@ -292,10 +280,9 @@ class DisulfideBondWizard(VariableWizard):
             if selectedTokens:
                 form.setVar(outputParams[0], '/'.join(selectedTokens))
 
-# Register the Wizard (Update these parameters to match your specific plugin structure)
 DisulfideBondWizard().addTarget(
-    protocol=AmberSystemPrep,  # Replace with your actual protocol class
-    targets=['disulfideBridgesNumber'],  # The UI element this wizard is attached to
-    inputs=['inputStructure'],  # The parameter holding the PDB file
-    outputs=['disulfideBridgesNumber']  # Where the string result will be saved
+    protocol=AmberSystemPrep,
+    targets=['disulfideBridgesNumber'],
+    inputs=['inputStructure'],
+    outputs=['disulfideBridgesNumber']
 )
