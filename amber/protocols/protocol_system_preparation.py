@@ -1074,8 +1074,8 @@ class AmberSystemPrep(EMProtocol):
                     continue
 
                 # Delegate line modifications to a flat helper function
-                processed_line = self._processPdbLine(line, requestedAmberSet)
-                cleanLines.append(processed_line)
+                processedLine = self._processPdbLine(line, requestedAmberSet)
+                cleanLines.append(processedLine)
 
         with open(amberPdb, 'w') as f:
             f.writelines(cleanLines)
