@@ -349,18 +349,18 @@ class AmberSystemPrep(EMProtocol):
 
                 cmdsTleap.extend(bonds)
             else:
-                print(f"  Notice: No sslink file found, skipping automated disulfides")
+                print("  Notice: No sslink file found, skipping automated disulfides")
 
         else:
             print("Processing manual disulfide configuration...")
             originalPdb = self._getExtraPath(f'{self.getSystemName()}.pdb')
-            manual_bonds = self.applyManualDisulfideBridges(
+            manualBonds = self.applyManualDisulfideBridges(
                 originalPdb=os.path.abspath(originalPdb),
                 amberPdb=inputStructure,
                 manualBridgesStr=self.disulfideBridgesNumber.get(),
                 unitName="PROT"
             )
-            cmdsTleap.extend(manual_bonds)
+            cmdsTleap.extend(manualBonds)
 
         # ligand
         if hasLigand and not hasMembrane:
@@ -1075,9 +1075,9 @@ class AmberSystemPrep(EMProtocol):
                 amberPairs.append((orig2amber[orig1], orig2amber[orig2]))
             else:
                 print(f"WARNING: Original pair {orig1[0]}_{orig1[1]} - {orig2[0]}_{orig2[1]} not found in mapping, skipping.")
-        tleap_bonds = self._generateTleapBonds(amberPairs, unitName)
+        tleapBonds = self._generateTleapBonds(amberPairs, unitName)
 
-        return tleap_bonds
+        return tleapBonds
 
     def _parseManualBridges(self, manualBridgesStr):
         """
@@ -1124,8 +1124,6 @@ class AmberSystemPrep(EMProtocol):
                 origNum = int(parts[2])
                 amberNum = int(parts[4])
                 orig2amber[(origChain, origNum)] = amberNum
-                continue
-
         return orig2amber
 
     def _buildRequestedAmberSet(self, requestedRes, orig2amber):
@@ -1151,36 +1149,44 @@ class AmberSystemPrep(EMProtocol):
 
         with open(amberPdb, 'r') as f:
             for line in f:
+                # Drop CONECT lines immediately
                 if line.startswith('CONECT'):
                     continue
 
-                if line.startswith(('ATOM', 'HETATM')):
-                    resName = line[17:20].strip()
-                    if resName in ['CYS', 'CYX']:
-                        try:
-                            amberRes = int(line[22:26].strip())
-                            isRequested = amberRes in requestedAmberSet
-                            targetName = 'CYX' if isRequested else 'CYS'
-
-                            if resName != targetName:
-                                line = line[:17] + targetName + line[20:]
-                        except ValueError:
-                            pass
-
-                cleanLines.append(line)
+                # Delegate line modifications to a flat helper function
+                processed_line = self._processPdbLine(line, requestedAmberSet)
+                cleanLines.append(processed_line)
 
         with open(amberPdb, 'w') as f:
             f.writelines(cleanLines)
 
-    def _generateTleapBonds(self, amber_pairs, unitName="PROT"):
+    def _processPdbLine(self, line, requestedAmberSet):
+        """Helper to process and update residue names for a single PDB line."""
+        if not line.startswith(('ATOM', 'HETATM')):
+            return line
+
+        # Guard: Only look at Cysteine residues
+        resName = line[17:20].strip()
+        if resName not in ['CYS', 'CYX']:
+            return line
+
+        amberRes = int(line[22:26].strip())
+        targetName = 'CYX' if amberRes in requestedAmberSet else 'CYS'
+
+        if resName != targetName:
+            return line[:17] + targetName + line[20:]
+
+        return line
+
+    def _generateTleapBonds(self, amberPairs, unitName="PROT"):
         """
         Generate tleap bond commands for disulfide bridges using AMBER residue IDs.
         Returns: list: Tleap bond command strings
         """
         tleapBonds = []
 
-        for amb1, amb2 in amber_pairs:
-            bond_cmd = f"bond {unitName}.{amb1}.SG {unitName}.{amb2}.SG"
-            tleapBonds.append(bond_cmd)
+        for amb1, amb2 in amberPairs:
+            bondCmd = f"bond {unitName}.{amb1}.SG {unitName}.{amb2}.SG"
+            tleapBonds.append(bondCmd)
 
         return tleapBonds

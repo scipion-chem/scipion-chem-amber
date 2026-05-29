@@ -164,9 +164,6 @@ class DisulfideBondWizard(VariableWizard):
         Returns: [((chainA, resIdxA, resNameA), (chainB, resIdxB, resNameB)), ...]
         Standardizes any input to mmCIF format using pwem utilities before parsing.
         """
-        # key: (chainId, resIdx) -> (x, y, z)
-        sgCoords = {}
-
         base, _ = os.path.splitext(os.path.basename(inputFile))
         tmpCifPath = os.path.abspath(protocol.getProject().getTmpPath(f'{base}_temp.cif'))
 
@@ -175,36 +172,7 @@ class DisulfideBondWizard(VariableWizard):
             print(f"ERROR: Conversion failed or mmCIF file missing: {cifFile}")
             return []
 
-        with open(cifFile, 'r') as f:
-            for line in f:
-                if not line.startswith(('ATOM', 'HETATM')):
-                    continue
-
-                try:
-                    parts = line.split()
-                    if len(parts) < 13:
-                        continue
-                    if parts[5].strip() != 'CYS':
-                        continue
-                    if parts[3].strip() != 'SG':  # only the sulfur atom
-                        continue
-
-                    chainId = parts[6].strip()
-                    if not chainId or chainId == '.':
-                        chainId = '_'
-
-                    resNumStr = parts[8].strip()
-                    if not resNumStr or not resNumStr.replace('-', '').isdigit():
-                        continue
-
-                    resIdx = int(resNumStr)
-                    x, y, z = float(parts[10]), float(parts[11]), float(parts[12])
-
-                    sgCoords[(chainId, resIdx)] = (x, y, z)
-
-                except (ValueError, IndexError) as e:
-                    print(f"WARNING: Could not parse line: {line.rstrip()}\n  Error: {e}")
-                    continue
+        sgCoords = self._extractSgCoordinates(cifFile)
 
         if cifFile == tmpCifPath and os.path.exists(tmpCifPath):
             try:
@@ -212,18 +180,53 @@ class DisulfideBondWizard(VariableWizard):
             except OSError:
                 pass
 
-        # Pairwise SG–SG distance filter (1.5–2.5 Å = disulfide bond range)
+        return self._findDisulfidePairs(sgCoords)
+
+    def _extractSgCoordinates(self, cifFile):
+        """Helper method to read an mmCIF file and extract CYS SG coordinates."""
+        sgCoords = {}
+        with open(cifFile, 'r') as f:
+            for line in f:
+                if not line.startswith(('ATOM', 'HETATM')):
+                    continue
+
+                parts = line.split()
+                # Guard: ensure valid length, specific residue (CYS), and atom (SG)
+                if len(parts) < 13 or parts[5].strip() != 'CYS' or parts[3].strip() != 'SG':
+                    continue
+
+                try:
+                    chainId = parts[6].strip()
+                    chainId = '_' if not chainId or chainId == '.' else chainId
+
+                    resNumStr = parts[8].strip()
+                    if not resNumStr or not resNumStr.replace('-', '').isdigit():
+                        continue
+
+                    sgCoords[(chainId, int(resNumStr))] = (
+                        float(parts[10]), float(parts[11]), float(parts[12])
+                    )
+                except (ValueError, IndexError) as e:
+                    print(f"WARNING: Could not parse line: {line.rstrip()}\n  Error: {e}")
+                    continue
+
+        return sgCoords
+
+    def _findDisulfidePairs(self, sgCoords):
+        """Helper method to compute pairwise distances and return valid CYS pairs."""
         pairs = []
         keys = list(sgCoords.keys())
-        for i in range(len(keys)):
+
+        for i, (chainA, resIdxA) in enumerate(keys):
+            xA, yA, zA = sgCoords[(chainA, resIdxA)]
+
             for j in range(i + 1, len(keys)):
-                kA, kB = keys[i], keys[j]
-                xA, yA, zA = sgCoords[kA]
-                xB, yB, zB = sgCoords[kB]
+                chainB, resIdxB = keys[j]
+                xB, yB, zB = sgCoords[(chainB, resIdxB)]
+
+                # Pairwise SG–SG distance filter
                 dist = ((xA - xB) ** 2 + (yA - yB) ** 2 + (zA - zB) ** 2) ** 0.5
                 if 1.5 <= dist <= 2.5:
-                    chainA, resIdxA = kA
-                    chainB, resIdxB = kB
                     pairs.append((
                         (chainA, resIdxA, 'CYS'),
                         (chainB, resIdxB, 'CYS'),
