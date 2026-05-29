@@ -281,10 +281,10 @@ class AmberMDSimulation(EMProtocol):
         self.createGUISummary()
         i = 1
         for wStep in self.workFlowSteps.get().strip().split('\n'):
-            self._insertFunctionStep('simulateStageStep', wStep, i)
+            self._insertFunctionStep(self.simulateStageStep, wStep, i)
             i += 1
 
-        self._insertFunctionStep('createOutputStep')
+        self._insertFunctionStep(self.createOutputStep)
 
     def simulateStageStep(self, wStep, i):
         msjDic = eval(wStep)
@@ -308,7 +308,6 @@ class AmberMDSimulation(EMProtocol):
         outSystem.setTopologyFile(localTopFile)
         outSystem.setCrdFile(localCrdFile)
 
-        outputTrajectory = self._getPath('outputTrajectory.nc')
         concatTrjFile = self.prepareSimTrj()
         if concatTrjFile is not None:
             outputTrajectory = self._getPath('outputTrajectory.nc')
@@ -758,7 +757,7 @@ class AmberMDSimulation(EMProtocol):
     def calculateSavedTrjTime(self):
         """Calculate the simulation time represented by the final saved trajectory block."""
         savedStageNames = {os.path.basename(stageDir) for stageDir in self.getSavedTrjStageDirs()}
-        total_ps = 0.0
+        totalPs = 0.0
         workSteps = self.workFlowSteps.get()
 
         for i, dicLine in enumerate(workSteps.split('\n'), start=1):
@@ -768,16 +767,16 @@ class AmberMDSimulation(EMProtocol):
             msjDic = eval(dicLine)
             stageName = '{}_{}'.format(i, msjDic.get('stepType'))
             if stageName in savedStageNames and msjDic.get('stepType') in ['Simulation', 'Custom']:
-                total_ps += msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.0)
+                totalPs += msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.0)
 
-        return total_ps
+        return totalPs
 
     def calculateTotalSimTime(self):
         """
         Calculates the total simulation time (in ps) by summing
         MDSteps * TimeStep for all production and heating stages.
         """
-        total_ps = 0.0
+        totalPs = 0.0
         workSteps = self.workFlowSteps.get()
 
         for dicLine in workSteps.split('\n'):
@@ -786,9 +785,9 @@ class AmberMDSimulation(EMProtocol):
             msjDic = eval(dicLine)
 
             if msjDic.get('stepType') in ['Simulation', 'Custom']:
-                total_ps += msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.0)
+                totalPs += msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.0)
 
-        return total_ps
+        return totalPs
 
     def getLastHeatingTemp(self):
         """Get the final temperature from the last Heating step in the workflow"""

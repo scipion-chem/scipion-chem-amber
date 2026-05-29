@@ -51,6 +51,7 @@ scriptLigPrepName = 'rdkit_addHydrogens.py'
 
 STRUCTURE, LIGAND = 0, 1
 LIG_INPUT = f'inputFrom == {LIGAND}'
+GAPS_OPTIONS = ['No', 'Gaps termini', 'All termini']
 
 class AmberSystemPrep(EMProtocol):
     """
@@ -102,7 +103,7 @@ class AmberSystemPrep(EMProtocol):
                        label='Run reduce first to add hydrogens: ')
         group.addParam('targetTleap', params.BooleanParam, default=False,
                        label='Add missing atoms: ')
-        group.addParam('addCaps', params.EnumParam, choices=['No', 'Gaps termini', 'All termini'], default=0,
+        group.addParam('addCaps', params.EnumParam, choices=GAPS_OPTIONS, default=0,
                        label='Add ACE and NME caps: ',
                        help='Add acetyl (ACE) and N-methylamide (NME) capping groups to protein N-termini and C-termini respectively. '
                             'These caps neutralize terminal charges and are commonly used in MD simulations. '
@@ -268,7 +269,6 @@ class AmberSystemPrep(EMProtocol):
     def prepPdbStep(self):
         recPDB = self.getReceptorPDB()
         inputStructure = self.getInputReceptorFilename()
-        recPDB = os.path.abspath(self._getExtraPath(f'{self.getSystemName()}.pdb'))
         if not inputStructure.endswith('.pdb'):
             inputStructure = self.convertPDB(inputStructure)
         shutil.copy(inputStructure, recPDB)
@@ -277,8 +277,8 @@ class AmberSystemPrep(EMProtocol):
         # self.renameCysToCyx(recPDB, self.disulfideBridgesNumber.get())
 
         addCapsMode = self.getEnumText('addCaps')
-        if addCapsMode in ['Gaps termini', 'All termini']:
-            mode = 'gaps' if addCapsMode == 'Gaps termini' else 'all'
+        if addCapsMode in GAPS_OPTIONS[1:]:
+            mode = 'gaps' if addCapsMode == GAPS_OPTIONS[1]  else 'all'
 
             cappedPdb = os.path.abspath(os.path.join(self.getTargetFileDir(), f'{systemBasename}_capped.pdb'))
             pmlScript = self.addCapsPml(recPDB, cappedPdb, mode)
@@ -440,14 +440,11 @@ class AmberSystemPrep(EMProtocol):
         # 2. Generate the final system PDB with Chain IDs using ambpdb
         # (ambpdb outputs to stdout, so we write it directly via Python's subprocess)
 
-        final_pdb_path = os.path.join(self.getTargetFileDir(), f"{targetBasename}_system_chains.pdb")
-        ambpdb_cmd = f"-p {targetBasename}.parm7 -c {targetBasename}.crd -ext > {final_pdb_path}"
+        finalPdbFile = os.path.join(self.getTargetFileDir(), f"{targetBasename}_system_chains.pdb")
+        ambpdbCmd = f"-p {targetBasename}.parm7 -c {targetBasename}.crd -ext > {finalPdbFile}"
+        amber.Plugin.runAmbertools(self, "ambpdb", ambpdbCmd, cwd=self.getTargetFileDir())
 
-        with open(final_pdb_path, "w") as out_pdb:
-            amber.Plugin.runAmbertools(self, "ambpdb", ambpdb_cmd, cwd=self.getTargetFileDir())
-            # subprocess.run(ambpdb_cmd, cwd=self.getTargetFileDir(), stdout=out_pdb)
-
-        print(f"System PDB with Chain IDs saved to: {final_pdb_path}")
+        print(f"System PDB with Chain IDs saved to: {finalPdbFile}")
 
     def membraneStep(self):
         inputStructure = self.findFile(self.getTargetFileDir(), '_amber.pdb')
@@ -685,131 +682,75 @@ class AmberSystemPrep(EMProtocol):
     # --------------------------- INFO functions -----------------------------------
 
     def _summary(self):
-        summary = []
-        if hasattr(self, 'outputSystem'):
-            outSystem = self.outputSystem
+        if not hasattr(self, 'outputSystem'):
+            return ['No output system produced yet.']
 
-            # Input
-            summary.append(f'System file    : {outSystem.getSystemFile()}')
-            if self.inputFrom.get() == LIGAND:
-                summary.append(f'Ligand         : {self.inputLigand.get()}')
+        outSystem = self.outputSystem
+        summary = [
+            f'System file    : {outSystem.getSystemFile()}',
+            f'Protein FF     : {self.getEnumText("proteinFF")}',
+            f'Water FF       : {self.getEnumText("waterForceField")}',
+            f'Topology       : {outSystem.getTopologyFile()}',
+            f'Coordinates    : {outSystem.getCrdFile()}',
+        ]
 
-            # Target preparation
-            prepFlags = []
-            if self.targetProteinResidues.get():    prepFlags.append('protein-only residues')
-            if self.targetAmberCompatibleResidues.get(): prepFlags.append('Amber-compatible residues')
-            if self.targetReduce.get():             prepFlags.append('reduce (add H)')
-            if self.targetTleap.get():              prepFlags.append('tleap missing atoms')
-            if self.targetPhSimulation.get():       prepFlags.append('constant-pH renaming')
-            if prepFlags:
-                summary.append(f'Target prep    : {", ".join(prepFlags)}')
-            if self.getEnumText("addCaps") != 'No':
-                summary.append(f'Capping        : {self.getEnumText("addCaps")}')
+        if self.inputFrom.get() == LIGAND:
+            summary.extend([
+                f'Ligand         : {self.inputLigand.get()}',
+                f'Ligand FF      : {self.getEnumText("ligandFF")}',
+            ])
 
-            # Force fields
-            summary.append(f'Protein FF     : {self.getEnumText("proteinFF")}')
-            summary.append(f'Water FF       : {self.getEnumText("waterForceField")}')
-            if self.inputFrom.get() == LIGAND:
-                summary.append(f'Ligand FF      : {self.getEnumText("ligandFF")} '
-                               f'/ charge: {self.getEnumText("ligandCharge")}')
+        prepFlags = self._getPreparationFlagsSummary()
+        if prepFlags:
+            summary.append(f'Target prep    : {", ".join(prepFlags)}')
 
-            # Solvent box
-            if self.tMem.get():
-                summary.append(f'Membrane       : {self.memLipids.get()} '
-                               f'(ratio {self.memRatio.get()}, '
-                               f'method: {self.getEnumText("memPosition")})')
-                summary.append(f'Lipid FF       : {self.getEnumText("lipidFF")}')
-            else:
-                summary.append(f'Solvation box  : {self.getEnumText("solvateStep")}, '
-                               f'padding {self.minDist.get()} Å')
-            if self.addIons.get():
-                summary.append(f'Salt           : {self.getEnumText("cationType")}/{self.getEnumText("anionType")} '
-                               f'at {self.ionConc.get()} M')
-
-            # Disulfide bridges
-            if self.disulfideBridges.get():
-                summary.append(f'S-S bridges    : {self.disulfideBridgesNumber.get()}')
-
-            # Output files
-            summary.append(f'Topology       : {outSystem.getTopologyFile()}')
-            summary.append(f'Coordinates    : {outSystem.getCrdFile()}')
+        if self.tMem.get():
+            summary.append(f'Membrane       : {self.memLipids.get()}')
         else:
-            summary.append('No output system produced yet.')
+            summary.append(
+                f'Solvation box  : {self.getEnumText("solvateStep")}'
+            )
+
         return summary
+
+    def _getPreparationFlagsSummary(self):
+        flags = []
+
+        options = [
+            (self.targetProteinResidues.get(), 'protein-only residues'),
+            (self.targetAmberCompatibleResidues.get(), 'Amber-compatible residues'),
+            (self.targetReduce.get(), 'reduce (add H)'),
+            (self.targetTleap.get(), 'tleap missing atoms'),
+            (self.targetPhSimulation.get(), 'constant-pH renaming'),
+        ]
+
+        for enabled, label in options:
+            if enabled:
+                flags.append(label)
+
+        return flags
 
     def _methods(self):
         methods = []
 
         if self.isFinished():
-            # Input preparation
-            if self.inputFrom.get() == LIGAND:
-                methods.append(
-                    f'The ligand "{self.inputLigand.get()}" was extracted from the input set of molecules '
-                    f'and prepared using RDKit (hydrogen addition). Antechamber was then used to assign '
-                    f'partial charges ({self.getEnumText("ligandCharge")}) and generate mol2/frcmod parameter '
-                    f'files, followed by parmchk2 to complete missing force field parameters. '
-                    f'An initial ligand topology was built with tleap using the '
-                    f'{self.getEnumText("ligandFF")} force field.'
-                )
-
-            # Target preparation
-            prepSteps = []
-            if self.targetProteinResidues.get():
-                prepSteps.append('non-protein residues were removed')
-            if self.targetAmberCompatibleResidues.get():
-                prepSteps.append('only Amber-compatible residues were kept')
-            if self.targetPhSimulation.get():
-                prepSteps.append('titratable residues (GLU, ASP, HIS) were renamed for constant-pH simulation')
-            if self.targetReduce.get():
-                prepSteps.append('hydrogens were added with reduce')
-            if self.targetTleap.get():
-                prepSteps.append('missing heavy atoms were rebuilt with tleap')
-            if self.getEnumText('addCaps') != 'No':
-                prepSteps.append(f'ACE/NME capping groups were added at {self.getEnumText("addCaps").lower()} '
-                                 f'using PyMol')
-
-            prepStr = (f'The receptor PDB was processed with pdb4amber'
-                       + (f', during which {"; ".join(prepSteps)}' if prepSteps else '')
-                       + ', producing an Amber-ready PDB file.')
-            methods.append(prepStr)
-
-            # Membrane
-            if self.tMem.get():
-                methods.append(
-                    f'The protein was embedded in a lipid bilayer composed of {self.memLipids.get()} '
-                    f'(molar ratio {self.memRatio.get()}) using packmol-memgen. '
-                    f'Membrane orientation was determined by the "{self.getEnumText("memPosition")}" method. '
-                    f'The lipid {self.getEnumText("lipidFF")} force field was applied. '
-                    f'The protein and, if present, the ligand were subsequently aligned to the membrane system.'
-                )
-
-            # System assembly with tleap
-            boxDesc = (f'a {self.getEnumText("solvateStep").lower()} water box with '
-                       f'{self.minDist.get()} Å padding'
-                       if not self.tMem.get()
-                       else f'a pre-built membrane box '
-                            f'({self.memDistXY.get()} Å XY / {self.memDistZ.get()} Å Z water layer)')
-
-            ionDesc = (f' Ions ({self.getEnumText("cationType")}/{self.getEnumText("anionType")}) '
-                       f'were added to neutralise the system and reach a salt concentration '
-                       f'of {self.ionConc.get()} M, calculated using the SPLIT method '
-                       f'(Machado & Pantano, J. Chem. Theory Comput. 2020).'
-                       if self.addIons.get() else '')
-
-            ssDesc = (f' Disulfide bridges were defined between residue pairs '
-                      f'{self.disulfideBridgesNumber.get()}.'
-                      if self.disulfideBridges.get() else '')
-
             methods.append(
-                f'The full system was assembled with tleap using the {self.getEnumText("proteinFF")} '
-                f'protein force field and the {self.getEnumText("waterForceField")} water model, '
-                f'solvated in {boxDesc}.{ionDesc}{ssDesc} '
-                f'tleap produced the topology (.parm7), coordinate (.crd), and PDB files required '
-                f'for the MD simulation.'
+                "This protocol prepares an Amber-compatible molecular dynamics system "
+                "starting from a protein structure and, optionally, a ligand structure. "
+                "The protocol uses AmberTools utilities such as pdb4amber, reduce, "
+                "Antechamber, parmchk2 and tleap to clean and parameterize the system.\n"
+                "The receptor structure can be processed to remove unwanted residues, "
+                "add hydrogens, rebuild missing atoms and prepare the structure for "
+                "constant-pH simulations. Optional ACE/NME capping groups can also be added.\n"
+                "If a ligand is provided, the ligand is parameterized with the selected "
+                "force field and charge method before being incorporated into the system.\n"
+                "The final system is assembled with tleap using the selected protein, "
+                "water and optional lipid force fields. The system can be solvated in "
+                "a water box or embedded into a membrane environment, and ions can be "
+                "added to neutralize the system and reach the desired salt concentration.\n"
+                "Finally, Amber topology, coordinate and structure files required for "
+                "molecular dynamics simulations are generated."
             )
-
-        else:
-            methods.append('The protocol has not finished yet.')
 
         return methods
 
@@ -877,12 +818,12 @@ class AmberSystemPrep(EMProtocol):
             "quit"
         ])
 
-        script_path = os.path.join(self.getTargetFileDir(),"capping_script.pml")
-        with open(script_path, "w") as f:
+        scriptPath = os.path.join(self.getTargetFileDir(),"capping_script.pml")
+        with open(scriptPath, "w") as f:
             f.write("\n".join(pmlLines))
 
-        print(f"PML script for adding caps: {script_path} for mode: {mode}")
-        return script_path
+        print(f"PML script for adding caps: {scriptPath} for mode: {mode}")
+        return scriptPath
 
     def runPymol(self, pymolScript, workinDir):
         # run in the background
@@ -905,38 +846,28 @@ class AmberSystemPrep(EMProtocol):
             'gaps': []
         }
 
-        for model in structure:
-            for chain in model:
-                residues = [r for r in chain if PDB.is_aa(r)]
-                if not residues:
-                    continue
+        for chain in structure.get_chains():
+            residues = [r for r in chain if PDB.is_aa(r)]
+            if not residues:
+                continue
 
-                segments = []
-                currentSeqStart = residues[0].id[1]
+            # Extract global N and C termini from the first and last amino acids
+            result['protein_termini'].append({
+                'chain': chain.id,
+                'n_term': residues[0].id[1],
+                'c_term': residues[-1].id[1]
+            })
 
-                for i in range(len(residues) - 1):
-                    res_curr = residues[i].id[1]
-                    res_next = residues[i + 1].id[1]
+            # Detect sequence breaks inline without building intermediate segment arrays
+            for resCurr, resNext in zip(residues, residues[1:]):
+                currId = resCurr.id[1]
+                nextId = resNext.id[1]
 
-                    # Check for a jump in residue numbering (a gap)
-                    if res_next != res_curr + 1:
-                        segments.append({'n': currentSeqStart, 'c': res_curr})
-                        currentSeqStart = res_next
-
-                # Add the final segment of the chain
-                segments.append({'n': currentSeqStart, 'c': residues[-1].id[1]})
-
-                result['protein_termini'].append({
-                    'chain': chain.id,
-                    'n_term': segments[0]['n'],
-                    'c_term': segments[-1]['c']
-                })
-
-                for i in range(len(segments) - 1):
+                if nextId != currId + 1:
                     result['gaps'].append({
                         'chain': chain.id,
-                        'c_term': segments[i]['c'],  # Needs NME
-                        'n_term': segments[i + 1]['n']  # Needs ACE
+                        'c_term': currId,  # Needs NME
+                        'n_term': nextId  # Needs ACE
                     })
         return result
 
@@ -956,33 +887,24 @@ class AmberSystemPrep(EMProtocol):
 
         cleanLines = [line for line in lines if not line.startswith("TER")]
         fixedLines = []
+        numLines = len(cleanLines)
 
         for i, line in enumerate(cleanLines):
-            if line.startswith("ATOM"):
-                res_name = line[17:20].strip()
-                atom_name_raw = line[12:16]
+            fixedLines.append(line)
 
-                # --- NME renaming - PyMOL usually outputs 'CH3', we rename it to 'C' ---
-                if res_name == "NME":
-                    if "CH3" in atom_name_raw:
-                        line = line[:12] + " C  " + line[16:]
+            # Guard Clause: Skip any line that isn't an NME ATOM record
+            if not line.startswith("ATOM") or line[17:20].strip() != "NME":
+                continue
 
-                fixedLines.append(line)
+            # If it's the very last line, it needs a TER
+            if i + 1 >= numLines:
+                fixedLines.append("TER\n")
+                continue
 
-                # --- TER Logic - gaps must be separated by a TER ---
-                if res_name == "NME":
-                    res_num = line[22:26].strip()
-                    if i + 1 < len(cleanLines):
-                        next_line = cleanLines[i + 1]
-                        if next_line.startswith("ATOM") and next_line[22:26].strip() != res_num:
-                            fixedLines.append("TER\n")
-                    else:
-                        fixedLines.append("TER\n")
-
-            elif line.startswith("END") or line.startswith("CONECT"):
-                fixedLines.append(line)
-            else:
-                fixedLines.append(line)
+            # Otherwise, check if the next atom belongs to a different residue
+            nextLine = cleanLines[i + 1]
+            if nextLine.startswith("ATOM") and nextLine[22:26].strip() != line[22:26].strip():
+                fixedLines.append("TER\n")
 
         with open(pdbPath, 'w') as f:
             f.writelines(fixedLines)
@@ -992,49 +914,47 @@ class AmberSystemPrep(EMProtocol):
 
     def insertTERLines(self, inputPDB, outputPDB=None):
         """Insert TER between chains and gaps, fixing NME caps."""
-        if outputPDB is None:
-            outputPDB = inputPDB
-
+        outputPDB = outputPDB or inputPDB
         lines = []
+
         prevChain = None
-        prevResNum = None
-        prevResName = None
-        lastAtomSerial = None
+        prevResNum = 0
+        prevResName = ""
+        lastAtomSerial = 0
 
         with open(inputPDB, 'r') as f:
             for line in f:
-                # Skip all existing TER records - we'll re-add them correctly
+                # Skip existing TER lines
                 if line.startswith('TER'):
                     continue
 
-                if line.startswith(('ATOM', 'HETATM')):
-                    atomSerial = int(line[6:11].strip())
-                    resName = line[17:20].strip()
-                    chainID = line[21:22].strip()
-                    resSeq = int(line[22:26].strip())
-
-                    # NME renaming: CH3 → C
-                    if resName == "NME" and "CH3" in line[12:16]:
-                        line = line[:12] + " C  " + line[16:]
-
-                    # Check if TER needed
-                    needTER = False
-                    if prevChain is not None:
-                        if chainID != prevChain or abs(resSeq - prevResNum) > 1:
-                            needTER = True
-
-                    if needTER:
-                        terSerial = lastAtomSerial + 1
-                        terLine = f"TER   {terSerial:5d}      {prevResName:3s} {prevChain}{prevResNum:4d}\n"
-                        lines.append(terLine)
-
+                # Pass non-atom lines straight through and skip the rest of the loop
+                if not line.startswith(('ATOM', 'HETATM')):
                     lines.append(line)
-                    prevChain = chainID
-                    prevResNum = resSeq
-                    prevResName = resName
-                    lastAtomSerial = atomSerial
-                else:
-                    lines.append(line)
+                    continue
+
+                # --- Main ATOM/HETATM parsing ---
+                atomSerial = int(line[6:11].strip())
+                resName = line[17:20].strip()
+                chainID = line[21:22].strip()
+                resSeq = int(line[22:26].strip())
+
+                # NME renaming: CH3 → C
+                if resName == "NME" and "CH3" in line[12:16]:
+                    line = line[:12] + " C  " + line[16:]
+
+                # Detect chain break or gap to insert TER
+                if prevChain and (chainID != prevChain or abs(resSeq - prevResNum) > 1):
+                    terSerial = lastAtomSerial + 1
+                    lines.append(f"TER   {terSerial:5d}      {prevResName:3s} {prevChain}{prevResNum:4d}\n")
+
+                lines.append(line)
+
+                # Update state variables for the next iteration
+                prevChain = chainID
+                prevResNum = resSeq
+                prevResName = resName
+                lastAtomSerial = atomSerial
 
         with open(outputPDB, 'w') as f:
             f.writelines(lines)
