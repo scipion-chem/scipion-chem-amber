@@ -166,8 +166,8 @@ class AmberSystemPrep(EMProtocol):
                        help='Force field applied to the water')
         group = form.addGroup('Disulfide bridges')
         group.addParam('disulfideBridges', params.EnumParam, display=params.EnumParam.DISPLAY_HLIST,
-                       label='Define S-S bonds', default=0,
-                       choices=['Automatic', 'Manual'],
+                       label='Define S-S bonds', default=1,
+                       choices=['None', 'Automatic', 'Manual'],
                        help='Automatic:  If a distance SG-SG less than 2.5 Angstrom is found between the SG atoms of two CYS, a disulfide bond is assumed.\n'
                             'Manual: Define the CYS pairs to bond using the wizard.')
         group.addParam('disulfideBridgesNumber', params.StringParam,
@@ -274,8 +274,6 @@ class AmberSystemPrep(EMProtocol):
         shutil.copy(inputStructure, recPDB)
         systemBasename = os.path.basename(recPDB.split(".")[0])
 
-        # self.renameCysToCyx(recPDB, self.disulfideBridgesNumber.get())
-
         addCapsMode = self.getEnumText('addCaps')
         if addCapsMode in GAPS_OPTIONS[1:]:
             mode = 'gaps' if addCapsMode == GAPS_OPTIONS[1]  else 'all'
@@ -284,7 +282,6 @@ class AmberSystemPrep(EMProtocol):
             pmlScript = self.addCapsPml(recPDB, cappedPdb, mode)
 
             self.runPymol(pmlScript, self.getTargetFileDir())
-            # self.fixPdbTER(cappedPdb)
             recPDB = cappedPdb
 
         self.insertTERLines(recPDB)
@@ -333,10 +330,12 @@ class AmberSystemPrep(EMProtocol):
         cmdsTleap.append(f"PROT = loadPdb {inputStructure}")
         components.append('PROT')
 
-        if self.getEnumText('disulfideBridges') == 'Automatic':
+        if self.getEnumText('disulfideBridges') == 'None':
+            print("No disulfide bridges requested, converting all CYX to CYS...")
+            self._clearAllDisulfides(inputStructure)
+        elif self.getEnumText('disulfideBridges') == 'Automatic':
             print("Using automated disulfide detection from pdb4amber...")
             sslinkFile = os.path.join(self.getTargetFileDir(), f'{self.getSystemName()}_amber_sslink')
-
             if os.path.exists(sslinkFile):
                 bonds = []
                 with open(sslinkFile, 'r') as f:
@@ -346,10 +345,9 @@ class AmberSystemPrep(EMProtocol):
                             parts = line.split()
                             if len(parts) >= 2:
                                 bonds.append(f"bond PROT.{parts[0]}.SG PROT.{parts[1]}.SG")
-
                 cmdsTleap.extend(bonds)
             else:
-                print("  Notice: No sslink file found, skipping automated disulfides")
+                print("Notice: No sslink file found, skipping automated disulfides")
 
         else:
             print("Processing manual disulfide configuration...")
@@ -960,6 +958,10 @@ class AmberSystemPrep(EMProtocol):
             f.writelines(lines)
 
         return outputPDB
+
+    def _clearAllDisulfides(self, amberPdb):
+        """Rewrite AMBER PDB converting all CYX to CYS. No tleap bond commands returned."""
+        self._rewritePdbWithCysteine(amberPdb, requestedAmberSet=set())
 
     def applyManualDisulfideBridges(self, originalPdb, amberPdb, manualBridgesStr, unitName="PROT"):
         """
