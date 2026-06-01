@@ -79,7 +79,7 @@ class AmberSystemPrep(EMProtocol):
         form.addSection(label=Message.LABEL_INPUT)
         iGroup = form.addGroup('Input')
 
-        iGroup.addParam('inputFrom', params.EnumParam, default=STRUCTURE,
+        iGroup.addParam('inputFrom', params.EnumParam, default=STRUCTURE, display=params.EnumParam.DISPLAY_HLIST,
                         label='Input from: ', choices=['AtomStruct', 'SetOfSmallMolecules'],
                         help='Type of input you want to use')
         iGroup.addParam('inputStructure', params.PointerParam, pointerClass='AtomStruct',
@@ -165,13 +165,14 @@ class AmberSystemPrep(EMProtocol):
                        label='Water Force Field',
                        help='Force field applied to the water')
         group = form.addGroup('Disulfide bridges')
-        group.addParam('disulfideBridges', params.BooleanParam,
-                       label='Are there any S-S bridges?', default=False,
-                       help='Residues involved must be renamed to CYX in the pdb file')
+        group.addParam('disulfideBridges', params.EnumParam, display=params.EnumParam.DISPLAY_HLIST,
+                       label='Define S-S bonds', default=1,
+                       choices=['None', 'Automatic', 'Manual'],
+                       help='Automatic:  If a distance SG-SG less than 2.5 Angstrom is found between the SG atoms of two CYS, a disulfide bond is assumed.\n'
+                            'Manual: Define the CYS pairs to bond using the wizard.')
         group.addParam('disulfideBridgesNumber', params.StringParam,
-                       condition='disulfideBridges',
-                       label='Number of the residues involved in the disulfide bridge \n'
-                             'with format 1º Residue - 2º Residue / 1º Residue - 2º Residue')
+                       condition='disulfideBridges == 1',
+                       label='Select CYS pairs: \n')
 
         group = form.addGroup('Solvent box')
         group.addParam('solvateStep', params.EnumParam, default=0, condition='tMem==False',
@@ -205,7 +206,7 @@ class AmberSystemPrep(EMProtocol):
         if molFile:
             self._insertFunctionStep(self.antechamberStep, molFile)
             self._insertFunctionStep(self.ligLeapStep)
-        self._insertFunctionStep(self.prepPdb)
+        self._insertFunctionStep(self.prepPdbStep)
         if self.tMem.get():
             self._insertFunctionStep(self.membraneStep)
         self._insertFunctionStep(self.tleapStep)
@@ -265,13 +266,14 @@ class AmberSystemPrep(EMProtocol):
 
         amber.Plugin.runAmbertools(self, 'tleap ', "-f leap_commands.txt", cwd=self.getLigandFileDir())
 
-    def prepPdb(self):
+    def prepPdbStep(self):
         recPDB = self.getReceptorPDB()
         inputStructure = self.getInputReceptorFilename()
         if not inputStructure.endswith('.pdb'):
             inputStructure = self.convertPDB(inputStructure)
         shutil.copy(inputStructure, recPDB)
         systemBasename = os.path.basename(recPDB.split(".")[0])
+
         addCapsMode = self.getEnumText('addCaps')
         if addCapsMode in GAPS_OPTIONS[1:]:
             mode = 'gaps' if addCapsMode == GAPS_OPTIONS[1]  else 'all'
@@ -280,12 +282,11 @@ class AmberSystemPrep(EMProtocol):
             pmlScript = self.addCapsPml(recPDB, cappedPdb, mode)
 
             self.runPymol(pmlScript, self.getTargetFileDir())
-            # self.fixPdbTER(cappedPdb)
             recPDB = cappedPdb
 
         self.insertTERLines(recPDB)
 
-        params = '{} -o {}_amber.pdb --dry'.format(recPDB, systemBasename)
+        params = '{} -o {}_amber.pdb --dry --nohyd --no-conect'.format(recPDB, systemBasename)
 
         if self.targetProteinResidues:
             params += ' -p '
@@ -328,11 +329,36 @@ class AmberSystemPrep(EMProtocol):
         components = []
         cmdsTleap.append(f"PROT = loadPdb {inputStructure}")
         components.append('PROT')
-        if self.disulfideBridges:
-            for pair in self.disulfideBridgesNumber.get().split('/'):
-                first = pair.split('-')[0]
-                second = pair.split('-')[1]
-                cmdsTleap.append(f"bond PROT.{first}.SG PROT.{second}.SG")
+
+        if self.getEnumText('disulfideBridges') == 'None':
+            print("No disulfide bridges requested, converting all CYX to CYS...")
+            self._clearAllDisulfides(inputStructure)
+        elif self.getEnumText('disulfideBridges') == 'Automatic':
+            print("Using automated disulfide detection from pdb4amber...")
+            sslinkFile = os.path.join(self.getTargetFileDir(), f'{self.getSystemName()}_amber_sslink')
+            if os.path.exists(sslinkFile):
+                bonds = []
+                with open(sslinkFile, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith('#'):
+                            parts = line.split()
+                            if len(parts) >= 2:
+                                bonds.append(f"bond PROT.{parts[0]}.SG PROT.{parts[1]}.SG")
+                cmdsTleap.extend(bonds)
+            else:
+                print("Notice: No sslink file found, skipping automated disulfides")
+
+        else:
+            print("Processing manual disulfide configuration...")
+            originalPdb = self._getExtraPath(f'{self.getSystemName()}.pdb')
+            manualBonds = self.applyManualDisulfideBridges(
+                originalPdb=os.path.abspath(originalPdb),
+                amberPdb=inputStructure,
+                manualBridgesStr=self.disulfideBridgesNumber.get(),
+                unitName="PROT"
+            )
+            cmdsTleap.extend(manualBonds)
 
         # ligand
         if hasLigand and not hasMembrane:
@@ -491,7 +517,7 @@ class AmberSystemPrep(EMProtocol):
 
         self._defineOutputs(outputSystem=createdSystem)
 
-    # --------------------------- INFO functions -----------------------------------
+    # --------------------------- UTILS functions -----------------------------------
     def getReceptorPDB(self):
         recPDB = os.path.abspath(self._getExtraPath(f'{self.getSystemName()}.pdb'))
         return recPDB
@@ -932,3 +958,157 @@ class AmberSystemPrep(EMProtocol):
             f.writelines(lines)
 
         return outputPDB
+
+    def _clearAllDisulfides(self, amberPdb):
+        """Rewrite AMBER PDB converting all CYX to CYS. No tleap bond commands returned."""
+        self._rewritePdbWithCysteine(amberPdb, requestedAmberSet=set())
+
+    def applyManualDisulfideBridges(self, originalPdb, amberPdb, manualBridgesStr, unitName="PROT"):
+        """
+        Map original PDB residue numbering to AMBER numbering, set CYX/CYS correctly,
+        and generate tleap bond commands for manual disulfide bridges.
+
+        Args:
+            originalPdb: Path to original PDB (unused, kept for compatibility)
+            amberPdb: Path to AMBER-prepared PDB file (modified in place)
+            manualBridgesStr: Bridge specification of the wizard "A_3-A_40/A_4-A_32"
+            unitName: Tleap unit name (default "PROT")
+
+        Returns:
+            list: Tleap bond command strings
+        """
+        # Step 1: Parse bridge specification
+        requestedRes, requestedPairs = self._parseManualBridges(manualBridgesStr)
+
+        # Step 2: Read renumbering mapping
+        renumFile = os.path.join(self.getTargetFileDir(), f'{getBaseName(originalPdb)}_amber_renum.txt')
+        orig2amber = self._readRenumberingFile(renumFile)
+
+        # Step 3: Convert to amber residue IDs
+        requestedAmberSet = self._buildRequestedAmberSet(requestedRes, orig2amber)
+
+        # Step 4: Rewrite PDB with correct CYX/CYS naming
+        self._rewritePdbWithCysteine(amberPdb, requestedAmberSet)
+
+        # Step 5: Generate tleap bond commands
+        amberPairs = []
+        for orig1, orig2 in requestedPairs:
+            if orig1 in orig2amber and orig2 in orig2amber:
+                amberPairs.append((orig2amber[orig1], orig2amber[orig2]))
+            else:
+                print(f"WARNING: Original pair {orig1[0]}_{orig1[1]} - {orig2[0]}_{orig2[1]} not found in mapping, skipping.")
+        tleapBonds = self._generateTleapBonds(amberPairs, unitName)
+
+        return tleapBonds
+
+    def _parseManualBridges(self, manualBridgesStr):
+        """
+        Parse bridge specification string into residue sets and pairs.
+        """
+        requestedRes = set()
+        requestedPairs = []
+
+        for pair in manualBridgesStr.split('/'):
+            if '-' not in pair:
+                continue
+
+            try:
+                r1, r2 = pair.split('-')
+                c1, n1 = r1.split('_')
+                c2, n2 = r2.split('_')
+
+                res1 = (c1, int(n1))
+                res2 = (c2, int(n2))
+
+                requestedRes.add(res1)
+                requestedRes.add(res2)
+                requestedPairs.append((res1, res2))
+            except ValueError:
+                print(f"WARNING: Could not parse bridge pair '{pair}', skipping")
+                continue
+
+        return requestedRes, requestedPairs
+
+    def _readRenumberingFile(self, renumFile):
+        """
+        Read amber_renum.txt and build original -> amber mapping.
+        Returns: dict: {(chain, orig_num): amber_num, ...}
+        """
+        orig2amber = {}
+
+        with open(renumFile, 'r') as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) < 5:
+                    continue
+
+                origChain = parts[1]
+                origNum = int(parts[2])
+                amberNum = int(parts[4])
+                orig2amber[(origChain, origNum)] = amberNum
+        return orig2amber
+
+    def _buildRequestedAmberSet(self, requestedRes, orig2amber):
+        """
+        Convert original residue IDs to amber residue IDs.
+        Returns: set: {amber_num1, amber_num2, ...}
+        """
+        requestedAmber = set()
+
+        for origKey in requestedRes:
+            if origKey in orig2amber:
+                amberNum = orig2amber[origKey]
+                requestedAmber.add(amberNum)
+
+        return requestedAmber
+
+    def _rewritePdbWithCysteine(self, amberPdb, requestedAmberSet):
+        """
+        Rewrite AMBER PDB: set CYX for requested cysteines, CYS for others.
+        Strip all CONECT records to avoid conflicts.
+        """
+        cleanLines = []
+
+        with open(amberPdb, 'r') as f:
+            for line in f:
+                # Drop CONECT lines immediately
+                if line.startswith('CONECT'):
+                    continue
+
+                # Delegate line modifications to a flat helper function
+                processedLine = self._processPdbLine(line, requestedAmberSet)
+                cleanLines.append(processedLine)
+
+        with open(amberPdb, 'w') as f:
+            f.writelines(cleanLines)
+
+    def _processPdbLine(self, line, requestedAmberSet):
+        """Helper to process and update residue names for a single PDB line."""
+        if not line.startswith(('ATOM', 'HETATM')):
+            return line
+
+        # Guard: Only look at Cysteine residues
+        resName = line[17:20].strip()
+        if resName not in ['CYS', 'CYX']:
+            return line
+
+        amberRes = int(line[22:26].strip())
+        targetName = 'CYX' if amberRes in requestedAmberSet else 'CYS'
+
+        if resName != targetName:
+            return line[:17] + targetName + line[20:]
+
+        return line
+
+    def _generateTleapBonds(self, amberPairs, unitName="PROT"):
+        """
+        Generate tleap bond commands for disulfide bridges using AMBER residue IDs.
+        Returns: list: Tleap bond command strings
+        """
+        tleapBonds = []
+
+        for amb1, amb2 in amberPairs:
+            bondCmd = f"bond {unitName}.{amb1}.SG {unitName}.{amb2}.SG"
+            tleapBonds.append(bondCmd)
+
+        return tleapBonds
