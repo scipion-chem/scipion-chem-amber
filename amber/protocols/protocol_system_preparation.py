@@ -171,7 +171,7 @@ class AmberSystemPrep(EMProtocol):
                        help='Automatic:  If a distance SG-SG less than 2.5 Angstrom is found between the SG atoms of two CYS, a disulfide bond is assumed.\n'
                             'Manual: Define the CYS pairs to bond using the wizard.')
         group.addParam('disulfideBridgesNumber', params.StringParam,
-                       condition='disulfideBridges == 1',
+                       condition='disulfideBridges == 2',
                        label='Select CYS pairs: \n')
 
         group = form.addGroup('Solvent box')
@@ -552,7 +552,7 @@ class AmberSystemPrep(EMProtocol):
         else:
             molFile = myMol.getPoseFile()
             sdfFile = convertToSdf(self, molFile)
-            paramFile = self.writePrepParamsFile([sdfFile])
+            paramFile = self.writePrepParamsFile([os.path.abspath(sdfFile)])
             pwchemPlugin.runScript(self, scriptLigPrepName, paramFile, env=RDKIT_DIC, cwd=self._getPath())
             return os.path.join(self.getLigandFileDir(), os.path.basename(sdfFile))
 
