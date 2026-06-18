@@ -28,19 +28,20 @@ import os
 
 from pyworkflow.tests import BaseTest, setupTestProject, DataSet
 from pwem.protocols import ProtImportPdb
-from pwchem.tests import TestPrepareReceptor, TestExtractLigand
+from pwchem.tests.tests_preparations import TestPrepareReceptor
+from pwchem.tests.tests_docking import TestExtractLigand
 from pwchem.protocols import ProtExtractLigands
 
 from amber.protocols import *
 from amber import Plugin as amberPlugin
 
 BASETEST = """{'MaxCycles': 500, 'SdCycles': 250, 'IntCutoff': 8.0,'Restraint': False, 'CustomIn': None, 'stepType': 'Minimization'}
-{'MDSteps': 500, 'TimeStep': 0.002, 'Traj': 100, 'InTemp': 0, 'FiTemp': 300, 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'Restraint': False, 'CustomIn': None, 'stepType': 'Heating'}
-{'MDSteps': 500, 'TimeStep': 0.002, 'TrajStep': 100, 'EnsemType': 'NPT', 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'Restraint': False, 'CoupConst': 2.0, 'FricConst': 2.0, 'Pressure': 1.0, 'Barostat': 'Monte Carlo', 'PressureScaling': 'isotropic', 'Restraint': False, 'RestrAtoms': 'Protein', 'RestrForce': 0.0, 'CustomIn': None, 'stepType': 'Simulation'}\n"""
+{'MDSteps': 500, 'TimeStep': 0.002, 'Traj': 100, 'SaveTrj': False, 'InTemp': 0, 'FiTemp': 300, 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'Restraint': False, 'CustomIn': None, 'stepType': 'Heating'}
+{'MDSteps': 500, 'TimeStep': 0.002, 'TrajStep': 100, 'SaveTrj': True, 'EnsemType': 'NPT', 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'Restraint': False, 'CoupConst': 2.0, 'FricConst': 2.0, 'Pressure': 1.0, 'Barostat': 'Monte Carlo', 'PressureScaling': 'isotropic', 'Restraint': False, 'RestrAtoms': 'Protein', 'RestrForce': 0.0, 'CustomIn': None, 'stepType': 'Simulation'}\n"""
 
 LONGTEST = """{'MaxCycles': 10000, 'SdCycles': 5000, 'IntCutoff': 8.0, 'Restraint': False, 'RestrAtoms': 'Protein + Ligand', 'RestrForce': 50.0, 'CustomIn': None, 'stepType': 'Minimization'}
-{'MDSteps': 5000, 'TimeStep': 0.002, 'Traj': 500, 'InTemp': 0.0, 'FiTemp': 300.0, 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'CoupConst': 2.0, 'FricConst': 2.0, 'CustomIn': None, 'Restraint': False, 'RestrAtoms': 'Backbone', 'RestrForce': 50.0, 'stepType': 'Heating'}
-{'MDSteps': 5000, 'TimeStep': 0.002, 'TrajStep': 500, 'EnsemType': 'NVT', 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'CoupConst': 2.0, 'FricConst': 2.0, 'Pressure': 1.0, 'Barostat': 'Monte Carlo', 'PressureScaling': 'isotropic', 'CustomIn': None, 'Restraint': False, 'RestrAtoms': 'Backbone', 'RestrForce': 50.0, 'stepType': 'Simulation'}"""
+{'MDSteps': 5000, 'TimeStep': 0.002, 'Traj': 500, 'SaveTrj': False, 'InTemp': 0.0, 'FiTemp': 300.0, 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'CoupConst': 2.0, 'FricConst': 2.0, 'CustomIn': None, 'Restraint': False, 'RestrAtoms': 'Backbone', 'RestrForce': 50.0, 'stepType': 'Heating'}
+{'MDSteps': 5000, 'TimeStep': 0.002, 'TrajStep': 500, 'SaveTrj': True, 'EnsemType': 'NVT', 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'CoupConst': 2.0, 'FricConst': 2.0, 'Pressure': 1.0, 'Barostat': 'Monte Carlo', 'PressureScaling': 'isotropic', 'CustomIn': None, 'Restraint': False, 'RestrAtoms': 'Backbone', 'RestrForce': 50.0, 'stepType': 'Simulation'}"""
 
 class TestAmberPrepareSystem(BaseTest):
     @classmethod
@@ -48,7 +49,6 @@ class TestAmberPrepareSystem(BaseTest):
         cls.ds = DataSet.getDataSet('model_building_tutorial')
         setupTestProject(cls)
         cls._runImportPDB()
-        cls._waitOutput(cls.protImportPDB, 'outputPdb', sleepTime=5)
 
     @classmethod
     def _runImportPDB(cls):
@@ -56,7 +56,7 @@ class TestAmberPrepareSystem(BaseTest):
             ProtImportPdb,
             inputPdbData=1,
             pdbFile=cls.ds.getFile('PDBx_mmCIF/1ake_mut1.pdb'))
-        cls.proj.launchProtocol(cls.protImportPDB, wait=False)
+        cls.launchProtocol(cls.protImportPDB)  # synchronous, no wait=False
 
     @classmethod
     def _runPrepareSystem(cls):
@@ -98,7 +98,7 @@ class TestAmberPrepareSystemLig(TestPrepareReceptor, TestExtractLigand):
         protExtLig.inputStructure.set(inputProt)
         protExtLig.inputStructure.setExtended('outputPdb')
 
-        cls.proj.launchProtocol(protExtLig)
+        cls.launchProtocol(protExtLig)
         cls.protExtLig = protExtLig
         return protExtLig
 
@@ -212,25 +212,3 @@ class TestAmberLigSimulation(TestAmberPrepareSystemLig):
         protSim = self._runSimulation(protPrepare)
         self._waitOutput(protSim, 'outputSystem', sleepTime=10)
         self.assertIsNotNone(getattr(protSim, 'outputSystem', None))
-
-# class TestAmberMembSimulation(TestAmberPrepareSystemMembrane):
-#
-#     def _runSimulation(self, protPrepare):
-#         protSim = self.newProtocol(
-#             AmberMDSimulation,
-#             amberSystem=protPrepare.outputSystem, workFlowSteps=LONGTEST)
-#         protSim.setObjLabel('amber - pmemd MD sim')
-#
-#         self.launchProtocol(protSim)
-#         return protSim
-#
-#     def test(self):
-#         protExtract = self._runExtractLigand(self.protImportPDB)
-#         self._waitOutput(protExtract, 'outputSmallMolecules')
-#
-#         protPrepare = self._runPrepareSystem(protExtract, inputFrom=LIGAND)
-#         self._waitOutput(protPrepare, 'outputSystem', sleepTime=10)
-#
-#         protSim = self._runSimulation(protPrepare)
-#         self._waitOutput(protSim, 'outputSystem', sleepTime=10)
-#         self.assertIsNotNone(getattr(protSim, 'outputSystem', None))
