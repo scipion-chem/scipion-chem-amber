@@ -78,6 +78,9 @@ class AmberSystemPViewer(MDSystemPViewer):
     def _defineParams(self, form):
       super()._defineParams(form)
 
+    def _getAnalysisTopFile(self):
+      return self.getMDSystem().getTopologyFile()
+
     def _showMdPymol(self, paramName=None):
       system = self.getMDSystem()
       return AmberSystemViewer(project=self.getProject())._visualize(system)
@@ -92,3 +95,74 @@ class AmberSystemPViewer(MDSystemPViewer):
 
       args = '-e {}'.format(outTcl)
       return [VmdViewPopen(args)]
+
+
+class AmberSimulationViewer(AmberSystemPViewer):
+    """ Visualize an Amber MD simulation, allowing the analysis to be restricted to the
+    trajectory of a single simulation stage (minimization / heating / production / custom). """
+    _label = 'Viewer Amber Simulation'
+    _targets = [AmberMDSimulation]
+
+    def __init__(self, **args):
+      super().__init__(**args)
+
+    def _defineSimParams(self, form):
+      '''Mirror the base "Open MD simulation" group but prepend a stage selector so the
+      trajectory shown with PyMol/VMD can be limited to one simulation stage.'''
+      group = form.addGroup('Open MD simulation')
+      group.addParam('chooseStage', params.EnumParam,
+                     choices=self._getStagesWTrj(), default=0,
+                     label='Choose the stage to display: ',
+                     help='Restrict trajectory visualization to a single simulation stage.\n'
+                          '"All" (default) uses the full concatenated production trajectory, '
+                          'preserving the previous behavior.')
+      group.addParam('displayMdPymol', params.LabelParam,
+                     label='Display trajectory with PyMol: ',
+                     help='Display the selected stage trajectory with PyMol.')
+      group.addParam('displayMdVMD', params.LabelParam,
+                     label='Display trajectory with VMD: ',
+                     help='Display the selected stage trajectory with VMD.')
+
+    def _defineMDTrajParams(self, form):
+      '''Add the inherited MDTraj analysis section and place an independent stage selector.'''
+      super()._defineMDTrajParams(form)
+      group = form.getParam('MDTraj_analysis') or form.addGroup('MDTraj analysis')
+      group.addParam('chooseStageAnalysis', params.EnumParam,
+                     choices=self._getStagesWTrj(), default=0,
+                     label='Choose the stage to analyze: ',
+                     help='Restrict the MDTraj analysis to a single simulation stage.\n'
+                          '"All" (default) analyzes the full concatenated production trajectory.')
+
+    def _getStagesWTrj(self):
+      '''Stages with a saved trajectory, plus the "All" (full trajectory) default.'''
+      return ['All'] + self.protocol.getStagesWithTrj()
+
+    def getMDSystem(self, objType=AmberSystem):
+      system = super().getMDSystem(objType)
+      stage = getattr(self, '_activeStage', 'All')
+      if system and stage and stage != 'All':
+        trjFile = self.protocol.getStageTrjFile(stage)
+        if trjFile and os.path.exists(trjFile):
+          system = system.clone()
+          system.setTrajectoryFile(trjFile)
+      return system
+
+    def _withStage(self, stageParam, func, paramName):
+      '''Run an inherited display/analysis method with getMDSystem scoped to the stage chosen
+      in stageParam, then restore the default scope.'''
+      self._activeStage = self.getEnumText(stageParam)
+      try:
+        return func(paramName)
+      finally:
+        self._activeStage = 'All'
+
+    # Display (PyMol / VMD) -> scoped by 'chooseStage'
+    def _showMdPymol(self, paramName=None):
+      return self._withStage('chooseStage', super()._showMdPymol, paramName)
+
+    def _showMdVMD(self, paramName=None):
+      return self._withStage('chooseStage', super()._showMdVMD, paramName)
+
+    # MDTraj analysis -> scoped by 'chooseStageAnalysis'
+    def _showMDTrajAnalysis(self, paramName=None):
+      return self._withStage('chooseStageAnalysis', super()._showMDTrajAnalysis, paramName)
