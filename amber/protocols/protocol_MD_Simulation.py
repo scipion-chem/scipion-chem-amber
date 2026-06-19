@@ -89,10 +89,10 @@ class AmberMDSimulation(EMProtocol):
                       allowsNull=True,
                       help='Amber solvated system to be simulated')
         group = form.addGroup('Minimization')
-        group.addParam('energyMin', params.BooleanParam,
-                       label='Energy Minimization: ', default=True,
-                       help='Energy minimization before the simulation (recommended)')
-        line = group.addLine('Minimization settings: ', condition='energyMin',
+        group.addParam('minEngine', params.EnumParam, label='Simulation Engine: ',
+            display=params.EnumParam.DISPLAY_HLIST, choices=self._amberEngines, default=1,
+            help='Sander runs on the CPU and pmemd on the GPU. It is sometimes recommended to run an initial minimization with sander, as pmemd is more prone to energy explosions.')
+        line = group.addLine('Minimization settings: ',
                              help='The first 20 cycles will utilize the steepest descent'
                                   'algorithm before shifting to the conjugate gradient '
                                   'algorithm for the remaining cycles\nThe first x cycles will utilize the steepest descent'
@@ -100,11 +100,11 @@ class AmberMDSimulation(EMProtocol):
                                   'algorithm for the remaining cycles\n'
                                   'Sphere of influence for each atom during energy minimization')
         line.addParam('minMaxCycles', params.IntParam, default=1000,
-                      label='Maximum cycles:', condition='energyMin')
+                      label='Maximum cycles:')
         line.addParam('minSdCycles', params.IntParam, default=500,
-                      label='Steepest Descent cycles:', condition='energyMin')
+                      label='Steepest Descent cycles:')
         line.addParam('minIntCutoff', params.FloatParam, default=8.0,
-                      label='Interaction cutoff', condition='energyMin')
+                      label='Interaction cutoff')
 
         group.addParam('minRestraint', params.BooleanParam, default=False,
                        label='Add restrains',
@@ -289,7 +289,7 @@ class AmberMDSimulation(EMProtocol):
     def simulateStageStep(self, wStep, i):
         msjDic = eval(wStep)
         mdpFile = self.generateMDPFile(msjDic, str(i))
-        self.callAmber(mdpFile, saveTrj=self.shouldSaveTrj(msjDic))
+        self.callAmber(mdpFile, saveTrj=self.shouldSaveTrj(msjDic), useSander=self.shouldUseSander(msjDic))
 
     def createOutputStep(self):
         lastCrdFile, lastTopoFile, lastOutFile = self.getPrevFinishedStageFiles()
@@ -316,8 +316,16 @@ class AmberMDSimulation(EMProtocol):
             outSystem.readTrjInfo(protocol=self, nTime=self.calculateSavedTrjTime(),
                                   outDir=self._getExtraPath())
 
-        finalPdbFile = self.crdToPDB(localCrdFile, localTopFile)
+        systemName = os.path.splitext(os.path.basename(oriSystemFile))[0]
+        finalPdbFile = self.crdToPDB(localCrdFile, localTopFile, outName=f'{systemName}_final.pdb')
         finalAtomStruct = AtomStruct(filename=relpath(finalPdbFile))
+
+        # Export the last minimization output as a PDB so it can be used as RMSD/RMSF reference
+        minCrdFile = self.getLastMinimizationCrd()
+        if minCrdFile:
+            minimizedPdb = self.crdToPDB(minCrdFile, localTopFile, outName=f'{systemName}_minimized.pdb')
+            outSystem.setMinimizedFile(minimizedPdb)
+
         self._defineOutputs(outputSystem=outSystem, lastFrameStruct=finalAtomStruct)
 
     # --------------------------- INFO functions -----------------------------------
@@ -590,7 +598,7 @@ class AmberMDSimulation(EMProtocol):
 
         return ", ".join(params)
 
-    def callAmber(self, mdpFile, saveTrj=True):
+    def callAmber(self, mdpFile, saveTrj=True, useSander=None):
         inputFile = os.path.abspath(mdpFile)
         stageDir = os.path.dirname(mdpFile)
         stage = os.path.split(stageDir)[-1]
@@ -621,14 +629,13 @@ class AmberMDSimulation(EMProtocol):
             command = f'-i {inputFile} -c {crdFile} -p {topFile} -ref {crdFile} -r {stage}.ncrst -o {stage}.o -inf {stage}.inf' \
                       f' -x {stage}.netcdf'
 
-        if self.useGpu.get():
+        if useSander is None:
+            useSander = not self.useGpu.get()
+        if useSander:
+            amberPlugin.runAmbertools(self, 'sander -O ', command, cwd=stageDir)
+        else:
             os.environ["CUDA_VISIBLE_DEVICES"] = self.gpuList.get()
             amberPlugin.runPmemd(self, ' -O ', args=command, cwd=stageDir)
-
-        else:
-            # Use sander for CPU execution
-            engine = 'sander'
-            amberPlugin.runAmbertools(self, 'sander -O ', command, cwd=stageDir)
 
         return os.path.join(stageDir, outFile)
 
@@ -658,27 +665,37 @@ class AmberMDSimulation(EMProtocol):
 
         return os.path.abspath(crdFile), os.path.abspath(topFile), outFile
 
-    def crdToPDB(self, crdFile, topFile):
-        """Run cpptraj to strip waters and ions and save the coordinates to a PDB file.
+    def crdToPDB(self, crdFile, topFile, outName):
+        """Run cpptraj to strip waters and ions and save the coordinates to the PDB file outName.
         """
-        systemName = os.path.splitext(os.path.basename(self.amberSystem.get().getSystemFile()))[0]
-        finalPdbFile = self._getPath(f'{systemName}_final.pdb')
+        pdbFile = self._getPath(outName)
 
         cpptrajCmds = f"""parm {os.path.abspath(topFile)}
             trajin {os.path.abspath(crdFile)}
             strip :{ENV_RES}
-            trajout {os.path.abspath(finalPdbFile)} pdb
+            trajout {os.path.abspath(pdbFile)} pdb
             run
             quit
             """
-        scriptPath = self._getExtraPath('strip_solvent_cpptraj.in')
+        scriptPath = self._getExtraPath('strip_solvent_{}.in'.format(os.path.splitext(outName)[0]))
         with open(scriptPath, 'w') as f:
             f.write(cpptrajCmds)
 
         cmd = f'-i {os.path.abspath(scriptPath)}'
         amberPlugin.runAmbertools(self, 'cpptraj', args=cmd, cwd=self._getExtraPath())
 
-        return finalPdbFile
+        return pdbFile
+
+    def getLastMinimizationCrd(self):
+        """Return the .ncrst coordinates file written by the last Minimization stage, or None
+        if the workflow contains no minimization stage."""
+        minDirs = natural_sort(glob.glob(self._getExtraPath('*_Minimization')))
+        if not minDirs:
+            return None
+        for file in os.listdir(minDirs[-1]):
+            if file.endswith('.ncrst'):
+                return os.path.abspath(os.path.join(minDirs[-1], file))
+        return None
 
     def getFFFiles(self):
         system = self.amberSystem.get()
@@ -740,6 +757,22 @@ class AmberMDSimulation(EMProtocol):
             return outputTrj
         print("Error: Concatenation failed")
         return None
+
+    def getStagesWithTrj(self):
+        """Return the basenames (e.g. '3_Simulation') of every stage that saved a trajectory
+        (.netcdf), naturally sorted. Exposed for the viewer so trajectory visualization and
+        analysis can be restricted to a single simulation stage."""
+        stages = []
+        for stageDir in natural_sort(glob.glob(self._getExtraPath('*_*'))):
+            if os.path.isdir(stageDir) and glob.glob(os.path.join(stageDir, '*.netcdf')):
+                stages.append(os.path.basename(stageDir))
+        return stages
+
+    def getStageTrjFile(self, stage):
+        """Return the absolute path of the .netcdf trajectory saved by the given stage, or None.
+        Used by the viewer to load only the trajectory of a selected stage."""
+        trjFiles = glob.glob(os.path.join(self._getExtraPath(stage), '*.netcdf'))
+        return os.path.abspath(trjFiles[0]) if trjFiles else None
 
     def getSavedTrjStageDirs(self):
         """Return the final contiguous block of Simulation/Custom dirs with saved trajectories."""
@@ -807,3 +840,10 @@ class AmberMDSimulation(EMProtocol):
                 continue
 
         return lastHeatingTemp
+
+    def shouldUseSander(self, msjDic):
+        """Minimization can be forced onto sander (CPU) even when a GPU is selected.
+           """
+        if msjDic.get('stepType') == 'Minimization' and msjDic.get('Engine') == 'sander':
+            return True
+        return not self.useGpu.get()
