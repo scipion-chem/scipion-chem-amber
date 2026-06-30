@@ -714,13 +714,10 @@ class AmberMDSimulation(EMProtocol):
 
     def getLastStageDir(self):
         """Returns the directory path of the stage with the highest number"""
-        pattern = self._getExtraPath('*_*')
-        allDirs = glob.glob(pattern)
-
+        allDirs = [d for d in glob.glob(self._getExtraPath('*_*')) if os.path.isdir(d)]
         if not allDirs:
             return None
         stageDirs = natural_sort(allDirs, rev=True)
-
         return os.path.abspath(stageDirs[0])
 
     def prepareSimTrj(self):
