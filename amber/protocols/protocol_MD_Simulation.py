@@ -64,7 +64,7 @@ class AmberMDSimulation(EMProtocol):
                        'workFlowSteps', 'hostName', 'numberOfThreads', 'numberOfMpi', 'minInsertStep', 'heatInsertStep',
                        'simInsertStep', 'customInsertStep']
 
-    _key_map = {'Minimization': 'min', 'Heating': 'heat', 'Simulation': 'sim', 'Custom': 'custom'}
+    _key_map = {'Minimization': 'min', 'Heating': 'heat', 'Production': 'sim', 'Custom': 'custom'}
 
     _restrained_groups = list(RESTRAINS_DIC.keys())
 
@@ -170,7 +170,7 @@ class AmberMDSimulation(EMProtocol):
                        help='Insert the defined Heating step into the workflow on the defined position (number).\n'
                             'The default (when empty) is the last position')
 
-        group = form.addGroup('Simulation - NVT or NPT')
+        group = form.addGroup('Production - NVT or NPT')
         line = group.addLine('Simulation time: ',
                              help='Time setting\n'
                                   'Number of MD steps to run '
@@ -371,7 +371,7 @@ class AmberMDSimulation(EMProtocol):
                 if msjDic.get('Restraint'):
                     lineText += f", restraint on {msjDic.get('RestrAtoms')}"
 
-            elif stepType == 'Simulation':  # Simulation
+            elif stepType == 'Production':
                 nTime = msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.002)
                 lineText += f"Sim. time: {nTime} ps, {msjDic.get('EnsemType', 'NPT')} ensemble, {lastTemp} K"
                 if not self.shouldSaveTrj(msjDic):
@@ -507,8 +507,8 @@ class AmberMDSimulation(EMProtocol):
                 msjDic['FiTemp'],
                 msjDic['FiTemp'])
 
-        elif stepType == 'Simulation':
-            params = 'MD SIMULATION\n&cntrl \n' \
+        elif stepType == 'Production':
+            params = 'MD PRODUCTION\n&cntrl \n' \
                      'imin=0, ntx=5, irest=1, nstlim={}, dt={}, ntf=2, ntc=2, ' \
                      'temp0={}, ntpr={} , ntwx={}, ig=-1, ' \
                      'cut=8.0'.format(msjDic['MDSteps'],
@@ -617,7 +617,7 @@ class AmberMDSimulation(EMProtocol):
                 command += ' -x {}.netcdf'.format(stage)
             command += ' -inf {}.inf'.format(stage)
 
-        elif stageType == 'Simulation':
+        elif stageType == 'Production':
             command = '-i {} -c {} -p {} -ref {} -r {}.ncrst' \
                       ' -o {}.o'.format(inputFile, crdFile, topFile, crdFile, *[stage] * 2)
             if saveTrj:
@@ -776,7 +776,7 @@ class AmberMDSimulation(EMProtocol):
 
     def getSavedTrjStageDirs(self):
         """Return the final contiguous block of Simulation/Custom dirs with saved trajectories."""
-        stageDirs = natural_sort(glob.glob(self._getExtraPath('*_Simulation')) +
+        stageDirs = natural_sort(glob.glob(self._getExtraPath('*_Production')) +
                                  glob.glob(self._getExtraPath('*_Custom')), rev=True)
         savedStageDirs = []
         for stageDir in stageDirs:
@@ -799,7 +799,7 @@ class AmberMDSimulation(EMProtocol):
 
             msjDic = eval(dicLine)
             stageName = '{}_{}'.format(i, msjDic.get('stepType'))
-            if stageName in savedStageNames and msjDic.get('stepType') in ['Simulation', 'Custom']:
+            if stageName in savedStageNames and msjDic.get('stepType') in ['Production', 'Custom']:
                 totalPs += msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.0)
 
         return totalPs
@@ -817,7 +817,7 @@ class AmberMDSimulation(EMProtocol):
 
             msjDic = eval(dicLine)
 
-            if msjDic.get('stepType') in ['Simulation', 'Custom']:
+            if msjDic.get('stepType') in ['Production', 'Custom']:
                 totalPs += msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.0)
 
         return totalPs

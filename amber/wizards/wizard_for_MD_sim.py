@@ -51,7 +51,7 @@ class AmberAddElementSummaryWizard(VariableWizard):
         elif 'heat' in form.wizParamName:
             stageType = 'Heating'
         elif 'sim' in form.wizParamName:
-            stageType = 'Simulation'
+            stageType = 'Production'
         elif 'custom' in form.wizParamName:
             stageType = 'Custom'
 
