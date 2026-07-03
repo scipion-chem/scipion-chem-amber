@@ -150,7 +150,7 @@ class AmberSystemPrep(EMProtocol):
                        choices=['ff14SB', 'ff19SB', 'ff14SBonlysc', 'ff15ipq', 'fb15', 'ff03.r1', 'ff03ua'],
                        default=0)
 
-        group.addParam('ligandCharge', params.EnumParam, default=2, choices=self._chargeModel,
+        group.addParam('ligandCharge', params.EnumParam, default=0, choices=self._chargeModel,
                        condition=LIG_INPUT, label="Small molecules charge method: ",
                        help='Small molecules charge method to use')
         group.addParam('ligandFF', params.EnumParam, default=1, choices=['gaff', 'gaff2', 'ESPALOMA'],
