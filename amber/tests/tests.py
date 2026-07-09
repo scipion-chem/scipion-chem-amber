@@ -113,7 +113,7 @@ class TestAmberPrepareSystemLig(TestPrepareReceptor, TestExtractLigand):
         else:
             protPrepareS.inputSetOfMols.set(protPrepare)
             protPrepareS.inputSetOfMols.setExtended('outputSmallMolecules')
-            protPrepareS.inputLigand.set('SmallMolecule (g1_1uaz_RET-1_1 molecule)')
+            protPrepareS.inputLigand.set('SmallMolecule (g1_1uaz_RET_255-1_1 molecule)')
 
         cls.launchProtocol(protPrepareS)
         return protPrepareS
