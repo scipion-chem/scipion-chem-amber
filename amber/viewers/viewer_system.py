@@ -27,10 +27,8 @@ import os, glob, subprocess
 import pyworkflow.viewer as pwviewer
 from pyworkflow.protocol import params
 from pwchem.viewers import PyMolViewer, PyMolView, VmdViewPopen, MDSystemPViewer
-# from pwchem.viewers.viewers_data import PML_MD_STR
 
 from pwchem.utils import natural_sort
-# from pwchem.constants import TCL_MD_STR, PML_MD_STR
 
 from amber import Plugin
 from ..objects import AmberSystem
@@ -96,7 +94,6 @@ class AmberSystemPViewer(MDSystemPViewer):
       args = '-e {}'.format(outTcl)
       return [VmdViewPopen(args)]
 
-
 class AmberSimulationViewer(AmberSystemPViewer):
     """ Visualize an Amber MD simulation, allowing the analysis to be restricted to the
     trajectory of a single simulation stage (minimization / heating / production / custom). """
@@ -107,8 +104,6 @@ class AmberSimulationViewer(AmberSystemPViewer):
       super().__init__(**args)
 
     def _defineSimParams(self, form):
-      '''Mirror the base "Open MD simulation" group but prepend a stage selector so the
-      trajectory shown with PyMol/VMD can be limited to one simulation stage.'''
       group = form.addGroup('Open MD simulation')
       group.addParam('chooseStage', params.EnumParam,
                      choices=self._getStagesWTrj(), default=0,
