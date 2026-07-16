@@ -37,11 +37,11 @@ from amber import Plugin as amberPlugin
 
 BASETEST = """{'MaxCycles': 500, 'SdCycles': 250, 'IntCutoff': 8.0,'Restraint': False, 'CustomIn': None, 'stepType': 'Minimization'}
 {'MDSteps': 500, 'TimeStep': 0.002, 'Traj': 100, 'SaveTrj': False, 'InTemp': 0, 'FiTemp': 300, 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'Restraint': False, 'CustomIn': None, 'stepType': 'Heating'}
-{'MDSteps': 500, 'TimeStep': 0.002, 'TrajStep': 100, 'SaveTrj': True, 'EnsemType': 'NPT', 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'Restraint': False, 'CoupConst': 2.0, 'FricConst': 2.0, 'Pressure': 1.0, 'Barostat': 'Monte Carlo', 'PressureScaling': 'isotropic', 'Restraint': False, 'RestrAtoms': 'Protein', 'RestrForce': 0.0, 'CustomIn': None, 'stepType': 'Simulation'}\n"""
+{'MDSteps': 500, 'TimeStep': 0.002, 'TrajStep': 100, 'SaveTrj': True, 'EnsemType': 'NPT', 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'Restraint': False, 'CoupConst': 2.0, 'FricConst': 2.0, 'Pressure': 1.0, 'Barostat': 'Monte Carlo', 'PressureScaling': 'isotropic', 'Restraint': False, 'RestrAtoms': 'Protein', 'RestrForce': 0.0, 'CustomIn': None, 'stepType': 'Production'}\n"""
 
 LONGTEST = """{'MaxCycles': 10000, 'SdCycles': 5000, 'IntCutoff': 8.0, 'Restraint': False, 'RestrAtoms': 'Protein + Ligand', 'RestrForce': 50.0, 'CustomIn': None, 'stepType': 'Minimization'}
 {'MDSteps': 5000, 'TimeStep': 0.002, 'Traj': 500, 'SaveTrj': False, 'InTemp': 0.0, 'FiTemp': 300.0, 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'CoupConst': 2.0, 'FricConst': 2.0, 'CustomIn': None, 'Restraint': False, 'RestrAtoms': 'Backbone', 'RestrForce': 50.0, 'stepType': 'Heating'}
-{'MDSteps': 5000, 'TimeStep': 0.002, 'TrajStep': 500, 'SaveTrj': True, 'EnsemType': 'NVT', 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'CoupConst': 2.0, 'FricConst': 2.0, 'Pressure': 1.0, 'Barostat': 'Monte Carlo', 'PressureScaling': 'isotropic', 'CustomIn': None, 'Restraint': False, 'RestrAtoms': 'Backbone', 'RestrForce': 50.0, 'stepType': 'Simulation'}"""
+{'MDSteps': 5000, 'TimeStep': 0.002, 'TrajStep': 500, 'SaveTrj': True, 'EnsemType': 'NVT', 'Thermostat': 'Langevin', 'CollisFreq': 2.0, 'CoupConst': 2.0, 'FricConst': 2.0, 'Pressure': 1.0, 'Barostat': 'Monte Carlo', 'PressureScaling': 'isotropic', 'CustomIn': None, 'Restraint': False, 'RestrAtoms': 'Backbone', 'RestrForce': 50.0, 'stepType': 'Production'}"""
 
 class TestAmberPrepareSystem(BaseTest):
     @classmethod
@@ -113,7 +113,7 @@ class TestAmberPrepareSystemLig(TestPrepareReceptor, TestExtractLigand):
         else:
             protPrepareS.inputSetOfMols.set(protPrepare)
             protPrepareS.inputSetOfMols.setExtended('outputSmallMolecules')
-            protPrepareS.inputLigand.set('SmallMolecule (g1_1uaz_RET-1_1 molecule)')
+            protPrepareS.inputLigand.set('SmallMolecule (g1_1uaz_RET_255-1_1 molecule)')
 
         cls.launchProtocol(protPrepareS)
         return protPrepareS
