@@ -40,6 +40,9 @@ AMBER_DIC = {'name': 'amber', 'version': AMBER_DEFAULT_VERSION, 'home': 'AMBER_H
 PROTEIN_RES = "ALA,ARG,ASN,ASP,CYS,GLN,GLU,GLY,HIS,ILE,LEU,LYS,MET,PHE,PRO,SER,THR,TRP,TYR,VAL," \
               "HID,HIE,HIP,CYX,ASH,GLH,LYN,ARN,ACE,NME,NHE"
 ENV_RES = "WAT,HOH,TIP3,SPC,SPCE,Na+,Cl-,K+,Cs+,Rb+,Li+,Mg+,Ca2+,Zn2+,POT,CLA,POPC,OL,PA,PC"
+WATER_RES = 'WAT,HOH,TIP3,TIP4,TIP5,SPC,SPCE,T4E,OPC'
+ION_RES   = 'Na+,Cl-,K+,Cs+,Rb+,Li+,Mg+,Ca2+,Zn2+,POT,CLA'
+
 RESTRAINS_DIC = {'Protein+Ligand': f':{PROTEIN_RES},LIG & !@H=', 'Protein only': f':{PROTEIN_RES} & !@H=',
                  'Ligand': ':LIG', 'Ligand+Backbone': ':LIG | @CA,C,N,O',
                  'Backbone': '@CA,C,N,O', 'CA': '@CA', 'Ligand+CA': ':LIG  | @CA',
