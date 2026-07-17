@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # **************************************************************************
 # *
-# * Authors:     Daniel Del Hoyo Gomez (ddelhoyo@cnb.csic.es)
+# * Authors:     Joaquin Algorta (joaquin.algorta@cnb.csic.es)
 # *
 # * Unidad de  Bioinformatica of Centro Nacional de Biotecnologia , CSIC
 # *
@@ -291,11 +291,6 @@ class AmberModifySystem(EMProtocol):
     def createOutputStep(self):
         inSystem = self.amberSystem.get()
         _, hasTraj = self._getTrajSource()
-
-        # Clone the input so all metadata is carried over. Only stripping changes the atom
-        # set, so only then do we swap in the new topology + reference structure (and drop
-        # the now-mismatched coordinates). Every other operation keeps the input's topology
-        # and structure, which already match the atoms in the modified trajectory.
         outSystem = inSystem.clone()
         if self.doStrip:
             outSystem.setTopologyFile(os.path.abspath(self.getCleanTopologyFile()))
@@ -304,8 +299,7 @@ class AmberModifySystem(EMProtocol):
 
         if hasTraj:
             outSystem.setTrajectoryFile(os.path.abspath(self.getCleanTrajectoryFile()))
-            outSystem.readTrjInfo(protocol=self, nTime=self._estimateOutTime(),
-                                  outDir=self._getExtraPath())
+            outSystem.readTrjInfo(protocol=self)
 
         self._defineOutputs(outputSystem=outSystem)
 
@@ -324,7 +318,7 @@ class AmberModifySystem(EMProtocol):
                 errs.append('The last frame must be greater than the first frame '
                             '(set Last = 0 to use the end of the trajectory).')
         if self.doDrop and self.cutByTime and inSystem is not None:
-            if not inSystem.getNFrames() or not inSystem.getNTime():
+            if not inSystem.getNFrames() or not inSystem.getNTimeNs():
                 errs.append('Time-based cutting needs the input trajectory metadata '
                             '(frames / time), which is not available. Use frame-based '
                             'cutting instead.')
@@ -381,13 +375,13 @@ class AmberModifySystem(EMProtocol):
 
         if self.doDrop:
             if self.cutByTime:
-                psPerFrame = self._psPerFrame()
-                t0 = self._timeToPs(self.firstTime.get(), self.getEnumText('timeUnit'))
-                t1 = self._timeToPs(self.lastTime.get(),  self.getEnumText('timeUnit'))
-                if self.firstTime.get() > 0 and psPerFrame:
-                    start = max(1, int(round(t0 / psPerFrame)))
-                if self.lastTime.get() > 0 and psPerFrame:
-                    stop = max(start, int(round(t1 / psPerFrame)))
+                nsPerFrame = self._nsPerFrame()
+                t0 = self._timeToNs(self.firstTime.get(), self.getEnumText('timeUnit'))
+                t1 = self._timeToNs(self.lastTime.get(),  self.getEnumText('timeUnit'))
+                if self.firstTime.get() > 0 and nsPerFrame:
+                    start = max(1, int(round(t0 / nsPerFrame)))
+                if self.lastTime.get() > 0 and nsPerFrame:
+                    stop = max(start, int(round(t1 / nsPerFrame)))
             else:
                 start = self.firstFrame.get() if self.firstFrame.get() > 0 else 1
                 stop = self.lastFrame.get() if self.lastFrame.get() > 0 else None
@@ -403,38 +397,10 @@ class AmberModifySystem(EMProtocol):
             parts.append(str(offset))
         return ' '.join(parts)
 
-    def _psPerFrame(self):
-        # Per-frame spacing of the *input* trajectory, derived by the system object
+    def _nsPerFrame(self):
+        # Per-frame spacing of the *input* trajectory (ns), derived by the system object
         # from the frame/time metadata it read directly from the input trajectory.
-        return self.amberSystem.get().getTimeStep()
-
-    def _estimateOutTime(self):
-        """Best-effort total time (ps) of the output trajectory, derived from the input
-        per-frame spacing, the applied stride and the resulting frame count."""
-        psPerFrame = self._psPerFrame()
-        if not psPerFrame:
-            return self.amberSystem.get().getNTime() or 0.0
-        stride = self.subsampleF.get() if self.doSubsample else 1
-        outFrames = self._countFrames(os.path.abspath(self.getCleanTrajectoryFile()))
-        if outFrames:
-            return psPerFrame * stride * outFrames
-        return self.amberSystem.get().getNTime() or 0.0
-
-    def _countFrames(self, trjFile):
-        """Return the number of frames in trjFile using ``cpptraj -tl``, or None."""
-        import re
-        topFile = self.getOutTopologyFile()
-        amberPlugin.runAmbertools(self, program='cpptraj',
-                                  args='-p {} -y {} -tl'.format(topFile, trjFile))
-        for logName in ('run.stdout', 'run.stderr'):
-            candidate = self._getPath('logs', logName)
-            if os.path.exists(candidate):
-                with open(candidate) as fh:
-                    for line in fh:
-                        m = re.search(r'Frames:\s*(\d+)', line)
-                        if m:
-                            return int(m.group(1))
-        return None
+        return self.amberSystem.get().getTimeStepNs()
 
     def getOutTopologyFile(self):
         """Topology of the output system: the new stripped one when stripping, otherwise the
@@ -498,7 +464,7 @@ class AmberModifySystem(EMProtocol):
         return kws.get(self.outputFormat.get(), 'netcdf')
 
     @staticmethod
-    def _timeToPs(value, unitStr):
-        """Convert a time value to picoseconds."""
-        factors = {'ps': 1.0, 'ns': 1e3}
+    def _timeToNs(value, unitStr):
+        """Convert a time value to nanoseconds."""
+        factors = {'ps': 1e-3, 'ns': 1.0}
         return value * factors.get(unitStr, 1.0)

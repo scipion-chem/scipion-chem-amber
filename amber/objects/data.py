@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 # **************************************************************************
 # *
-# * Authors:     Aida Pinacho Pérez
+# * Authors:     Joaquin Algorta (joaquin.algorta@cnb.csic.es)
 # *
-# *
-# * your institution
+# * Unidad de  Bioinformatica of Centro Nacional de Biotecnologia , CSIC
 # *
 # * This program is free software; you can redistribute it and/or modify
 # * it under the terms of the GNU General Public License as published by
@@ -44,16 +43,16 @@ class AmberSystem(MDSystem):
         self._libFile = pwobj.String(kwargs.get('libFile', None))
         self._crdFile = pwobj.String(kwargs.get('crdFile', None))
         self._nFrames = pwobj.Integer(kwargs.get('nFrames', None))
-        self._nTime = pwobj.Float(kwargs.get('nTime', None))
+        self._nTime = pwobj.Float(kwargs.get('nTimeNs', None))  # total trajectory time, ns
 
     def __str__(self):
         strStr = '{} ({}'.format(self.getClassName(), os.path.basename(self.getSystemFile()))
 
         if self.hasTrajectory():
-            strStr += ', frames: {}, time(ps): {:.1f}'.format(
-                self.getNFrames(),
-                self.getNTime()
-            )
+            strStr += ', frames: {}'.format(self.getNFrames())
+            nTimeNs = self.getNTimeNs()
+            if nTimeNs is not None:
+                strStr += ', time: {:.3f} ns'.format(nTimeNs)
         strStr += ')'
         return strStr
 
@@ -69,32 +68,36 @@ class AmberSystem(MDSystem):
     def setNFrames(self, value):
         self._nFrames.set(value)
 
-    def getNTime(self):
+    def getNTimeNs(self):
+        """Total trajectory time in nanoseconds, or None if unknown."""
         return self._nTime.get()
 
-    def setNTime(self, value):
-        self._nTime.set(value)
+    def setNTimeNs(self, valueNs):
+        """Store the total trajectory time, in nanoseconds."""
+        self._nTime.set(valueNs)
 
-    def getFrameIdxs(self):
-        """Return [firstFrame, lastFrame] as Python ints.
-        Returns [0, 0] if not yet populated.
-        """
-        return [self._firstFrame.get(), self._lastFrame.get()]
+    def getTimeStepNs(self):
+        """Time between consecutive saved frames (ns), or None when unknown.
+        Derived from the stored total time and frame count"""
+        nFrames, nTimeNs = self.getNFrames(), self.getNTimeNs()
+        if nFrames and nTimeNs:
+            return nTimeNs / nFrames
+        return None
 
     def hasTrjInfo(self):
-        """True only when readTrjInfo has been called and found valid data."""
-        return self._lastFrame.get() > 0
+        """True once readTrjInfo has populated a positive frame count."""
+        return bool(self.getNFrames())
 
-
-    def readTrjInfo(self, protocol, nTime, outDir=None):
+    def readTrjInfo(self, protocol, nTimeNs=None):
+        """Populate the trajectory metadata (number of frames and total time in ns)
+        by reading it **from the trajectory file."""
         topFile = os.path.abspath(self.getTopologyFile())
         trjFile = os.path.abspath(self.getTrajectoryFile())
 
-        nFrames = self._cpptrajGetNFrames(protocol, topFile, trjFile)
+        self.setNFrames(self._cpptrajGetNFrames(protocol, topFile, trjFile))
 
-        self.setNFrames(nFrames)
-        self.setNTime(nTime)
-
+        trjTimeNs = self._readTrajTimeNs(trjFile)
+        self.setNTimeNs(trjTimeNs if trjTimeNs is not None else nTimeNs)
 
     # ── helpers ─────────────────────────────
 
@@ -107,6 +110,7 @@ class AmberSystem(MDSystem):
         amberPlugin.runAmbertools(protocol, program='cpptraj',
                                     args=args)
 
+        nFrames = None
         for logName in ('run.stdout', 'run.stderr'):
             candidate = protocol._getPath('logs', logName)
             if os.path.exists(candidate):
@@ -116,6 +120,34 @@ class AmberSystem(MDSystem):
                         if m:
                             nFrames = int(m.group(1))
                             break
-                break
+                if nFrames is not None:
+                    break
 
         return nFrames
+
+    @staticmethod
+    def _readTrajTimeNs(trjFile):
+        """Return the total elapsed time (ns) actually stored in the trajectory:
+        the time stamp of its last frame. Returns None when no usable time is present"""
+        if not trjFile or not str(trjFile).lower().endswith(('.nc', '.netcdf', '.ncdf')):
+            return None
+        try:
+            import numpy as np
+            from scipy.io import netcdf_file
+            nc = netcdf_file(trjFile, 'r', mmap=False)
+            try:
+                if 'time' not in nc.variables:
+                    return None
+                times = np.array(nc.variables['time'][:], dtype=float)
+            finally:
+                nc.close()
+        except Exception:
+            return None
+
+        if times.size == 0:
+            return None
+        lastPs = float(times[-1])
+        if lastPs <= 0:
+            mxPs = float(times.max())
+            lastPs = mxPs if mxPs > 0 else 0.0
+        return lastPs / 1000.0 if lastPs > 0 else None

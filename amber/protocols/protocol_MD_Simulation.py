@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # **************************************************************************
 # *
-# * Authors:     Aida Pinacho Pérez
+# * Authors:     Joaquin Algorta (joaquin.algorta@cnb.csic.es)
 # *
 # * Unidad de  Bioinformatica of Centro Nacional de Biotecnologia , CSIC
 # *
@@ -302,7 +302,7 @@ class AmberMDSimulation(EMProtocol):
 
         mFF, wFF = self.getFFFiles()
 
-        outSystem = AmberSystem(filename=relpath(oriSystemFile), ff=mFF, wff=wFF, nTime=self.calculateTotalSimTime(),
+        outSystem = AmberSystem(filename=relpath(oriSystemFile), ff=mFF, wff=wFF,
                                 ligTopFile=ligTopFile, ligName=ligID)
 
         outSystem.setTopologyFile(localTopFile)
@@ -313,8 +313,7 @@ class AmberMDSimulation(EMProtocol):
             outputTrajectory = self._getPath('outputTrajectory.nc')
             shutil.copyfile(concatTrjFile, outputTrajectory)
             outSystem.setTrajectoryFile(outputTrajectory)
-            outSystem.readTrjInfo(protocol=self, nTime=self.calculateSavedTrjTime(),
-                                  outDir=self._getExtraPath())
+            outSystem.readTrjInfo(protocol=self, nTimeNs=self.calculateSavedTrjTime() / 1000.0)
 
         systemName = os.path.splitext(os.path.basename(oriSystemFile))[0]
         finalPdbFile = self.crdToPDB(localCrdFile, localTopFile, outName=f'{systemName}_final.pdb')
@@ -363,17 +362,17 @@ class AmberMDSimulation(EMProtocol):
                     lineText += f", restraint on {msjDic.get('RestrAtoms')}"
 
             elif stepType == 'Heating':
-                nTime = msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.002)
+                nsTime = msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.002) / 1000.0
                 lastTemp = msjDic.get('FiTemp', 300)
-                lineText += f"Sim. time: {nTime} ps, NVT ensemble, {msjDic.get('InTemp', 0)} K to {lastTemp} K"
+                lineText += f"Sim. time: {nsTime:.3f} ns, NVT ensemble, {msjDic.get('InTemp', 0)} K to {lastTemp} K"
                 if not self.shouldSaveTrj(msjDic):
                     lineText += ', trajectory not saved'
                 if msjDic.get('Restraint'):
                     lineText += f", restraint on {msjDic.get('RestrAtoms')}"
 
             elif stepType == 'Production':
-                nTime = msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.002)
-                lineText += f"Sim. time: {nTime} ps, {msjDic.get('EnsemType', 'NPT')} ensemble, {lastTemp} K"
+                nsTime = msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.002) / 1000.0
+                lineText += f"Sim. time: {nsTime:.3f} ns, {msjDic.get('EnsemType', 'NPT')} ensemble, {lastTemp} K"
                 if not self.shouldSaveTrj(msjDic):
                     lineText += ', trajectory not saved'
                 if msjDic.get('Restraint'):
@@ -797,24 +796,6 @@ class AmberMDSimulation(EMProtocol):
             msjDic = eval(dicLine)
             stageName = '{}_{}'.format(i, msjDic.get('stepType'))
             if stageName in savedStageNames and msjDic.get('stepType') in ['Production', 'Custom']:
-                totalPs += msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.0)
-
-        return totalPs
-
-    def calculateTotalSimTime(self):
-        """
-        Calculates the total simulation time (in ps) by summing
-        MDSteps * TimeStep for all production and heating stages.
-        """
-        totalPs = 0.0
-        workSteps = self.workFlowSteps.get()
-
-        for dicLine in workSteps.split('\n'):
-            if not dicLine.strip(): continue
-
-            msjDic = eval(dicLine)
-
-            if msjDic.get('stepType') in ['Production', 'Custom']:
                 totalPs += msjDic.get('MDSteps', 0) * msjDic.get('TimeStep', 0.0)
 
         return totalPs

@@ -1,6 +1,6 @@
 # **************************************************************************
 # *
-# * Authors: Aida Pinacho Pérez
+# * Authors: Joaquin Algorta (joaquin.algorta@cnb.csic.es)
 # *
 # * Unidad de  Bioinformatica of Centro Nacional de Biotecnologia , CSIC
 # *
