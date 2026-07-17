@@ -33,6 +33,8 @@ from pwchem.tests.tests_docking import TestExtractLigand
 from pwchem.protocols import ProtExtractLigands
 
 from amber.protocols import *
+from amber.protocols.protocol_system_modification import (
+    STRIP_SOLVENT, STRIP_CUSTOM, FIT_MASK_BACKBONE, OUT_FMT_NC, OUT_FMT_DCD)
 from amber import Plugin as amberPlugin
 
 BASETEST = """{'MaxCycles': 500, 'SdCycles': 250, 'IntCutoff': 8.0,'Restraint': False, 'CustomIn': None, 'stepType': 'Minimization'}
@@ -212,3 +214,57 @@ class TestAmberLigSimulation(TestAmberPrepareSystemLig):
         protSim = self._runSimulation(protPrepare)
         self._waitOutput(protSim, 'outputSystem', sleepTime=10)
         self.assertIsNotNone(getattr(protSim, 'outputSystem', None))
+
+
+class TestAmberTrajMod(TestAmberCpuSimulation):
+    """Prepare -> CPU simulation (saves a trajectory) -> modify the trajectory
+    with several cpptraj operation combinations."""
+
+    def _runModify(self, protSim, label, **kwargs):
+        protMod = self.newProtocol(
+            AmberModifySystem, amberSystem=protSim.outputSystem, **kwargs)
+        protMod.setObjLabel(label)
+        self.launchProtocol(protMod)
+        return protMod
+
+    def test(self):
+        protPrepare = self._runPrepareSystem()
+        self._waitOutput(protPrepare, 'outputSystem', sleepTime=10)
+        protSim = self._runSimulation(protPrepare)
+        self._waitOutput(protSim, 'outputSystem', sleepTime=10)
+        nFramesIn = protSim.outputSystem.getNFrames()
+
+        # 1. autoimage + strip solvent + RMS fit on the backbone -> NetCDF
+        protMod = self._runModify(
+            protSim, 'amber - strip+fit (nc)',
+            doAutoimage=True, doStrip=True, stripSelection=STRIP_SOLVENT,
+            doFit=True, fitMaskType=FIT_MASK_BACKBONE, outputFormat=OUT_FMT_NC)
+        outSys = getattr(protMod, 'outputSystem', None)
+        self.assertIsNotNone(outSys)
+        self.assertTrue(outSys.hasTrajectory())
+        self.assertIsNotNone(outSys.getNFrames())
+        self.assertGreater(outSys.getNFrames(), 0)
+        # cloned metadata (force field) must be preserved from the input system
+        self.assertEqual(outSys.getForceField(),
+                         protSim.outputSystem.getForceField())
+        # stripping invalidates the original coordinates, so they are dropped
+        self.assertIsNone(outSys.getCrdFile())
+
+        # 2. frame-based cut + subsampling -> DCD (must not increase frame count)
+        protMod2 = self._runModify(
+            protSim, 'amber - cut+subsample (dcd)',
+            doAutoimage=False, doDrop=True, cutByTime=False,
+            firstFrame=1, lastFrame=4, doSubsample=True, subsampleF=2,
+            outputFormat=OUT_FMT_DCD)
+        outSys2 = getattr(protMod2, 'outputSystem', None)
+        self.assertIsNotNone(outSys2)
+        self.assertTrue(outSys2.hasTrajectory())
+        if nFramesIn:
+            self.assertLessEqual(outSys2.getNFrames(), nFramesIn)
+
+        # 3. custom strip mask (waters only) -> NetCDF
+        protMod3 = self._runModify(
+            protSim, 'amber - custom strip',
+            doAutoimage=True, doStrip=True, stripSelection=STRIP_CUSTOM,
+            stripMaskCustom=':WAT', outputFormat=OUT_FMT_NC)
+        self.assertIsNotNone(getattr(protMod3, 'outputSystem', None))

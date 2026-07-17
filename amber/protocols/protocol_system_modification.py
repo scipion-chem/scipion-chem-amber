@@ -30,15 +30,13 @@ This module modifies an Amber MD system trajectory and/or coordinates using cppt
 """
 
 import os
-import shutil
 
 from pyworkflow.protocol import params
 from pyworkflow.utils import Message
 from pwem.protocols import EMProtocol
 
 from amber import Plugin as amberPlugin
-from amber.objects import AmberSystem
-from amber.constants import ENV_RES, WATER_RES, ION_RES
+from amber.constants import ENV_RES, WATER_RES, ION_RES, PROTEIN_RES
 
 
 # ── Enum index constants (keep in sync with the choices lists in _defineParams) ──
@@ -57,9 +55,8 @@ OUT_FMT_XTC       = 2
 OUT_FMT_CRD       = 3    # Amber ASCII trajectory (cpptraj keyword 'crd')
 OUT_FMT_PDB       = 4
 
-TIME_UNIT_FS = 0
-TIME_UNIT_PS = 1
-TIME_UNIT_NS = 2
+TIME_UNIT_PS = 0
+TIME_UNIT_NS = 1
 
 
 class AmberModifySystem(EMProtocol):
@@ -87,56 +84,13 @@ class AmberModifySystem(EMProtocol):
                       pointerClass='AmberSystem',
                       help='Amber solvated system (topology + trajectory) to process.')
 
-        # ── 1. Cutting ────────────────────────────────────────────────────
-        group = form.addGroup('Cutting')
-        group.addParam('doDrop', params.BooleanParam,
-                       label='Cut trajectory?: ', default=False,
-                       help='Keep only frames within a time (or frame-number) window.')
-        group.addParam('cutByTime', params.BooleanParam,
-                       label='Define window by time?: ', default=True,
-                       condition='doDrop',
-                       help='If Yes, the window is given in simulation time and converted '
-                            'to frame indices using the input trajectory metadata '
-                            '(frames / time). If No, frame indices are used directly.')
-        line = group.addLine('Time window: ',
-                             condition='doDrop and cutByTime',
-                             help='Start and end times (0 = use the trajectory limits).')
-        line.addParam('firstTime', params.FloatParam, label='Start: ', default=0.0)
-        line.addParam('lastTime',  params.FloatParam, label='End: ',   default=0.0)
-        line.addParam('timeUnit',  params.EnumParam,
-                      label='Units: ', default=TIME_UNIT_NS,
-                      choices=['fs', 'ps', 'ns'])
-        line2 = group.addLine('Frame window: ',
-                              condition='doDrop and not cutByTime',
-                              help='First and last frame numbers (1-based; '
-                                   '0 = use the trajectory limits).')
-        line2.addParam('firstFrame', params.IntParam, label='Start: ', default=1)
-        line2.addParam('lastFrame',  params.IntParam, label='End: ',   default=0)
+        # Stripping is shown first and is always available: it is the only operation
+        # that also makes sense on a topology-only system (no trajectory). Every other
+        # group below operates on frames, so it is hidden unless the input has a
+        # trajectory (``hasTraj`` condition).
+        hasTraj = 'amberSystem and amberSystem.hasTrajectory()'
 
-        # ── 2. Subsampling ────────────────────────────────────────────────
-        group = form.addGroup('Subsampling')
-        group.addParam('doSubsample', params.BooleanParam,
-                       label='Subsample trajectory?: ', default=False,
-                       help='Keep only every N-th frame from the (possibly cut) trajectory.')
-        group.addParam('subsampleF', params.IntParam,
-                       label='Keep every N frames: ', default=10,
-                       condition='doSubsample',
-                       help='Frame stride. E.g. 10 = keep 1 frame out of 10.')
-
-        # ── 3. Imaging ────────────────────────────────────────────────────
-        group = form.addGroup('Imaging (PBC fix)')
-        group.addParam('doAutoimage', params.BooleanParam,
-                       label='Autoimage trajectory?: ', default=True,
-                       help='Re-image molecules back into the primary unit cell using the '
-                            'cpptraj *autoimage* command. Recommended as the first action '
-                            'for solvated systems. Requires box information in the trajectory.')
-        group.addParam('autoimageAnchor', params.StringParam,
-                       label='Anchor mask: ', default='',
-                       condition='doAutoimage',
-                       help='Amber mask for the anchor molecule (the component kept centred). '
-                            'Leave blank to let cpptraj choose automatically. Example: ``:1-300``')
-
-        # ── 4. Stripping ──────────────────────────────────────────────────
+        # ── Stripping (form order: 1 · cpptraj order: 3) ──────────────────
         group = form.addGroup('Stripping')
         group.addParam('doStrip', params.BooleanParam,
                        label='Strip atoms?: ', default=False,
@@ -158,8 +112,61 @@ class AmberModifySystem(EMProtocol):
                        condition='doStrip and stripSelection=={}'.format(STRIP_CUSTOM),
                        help='Amber mask of residues/atoms to strip, e.g. ``:WAT,Na+,Cl-``')
 
-        # ── 5. Fitting ────────────────────────────────────────────────────
-        group = form.addGroup('Fitting')
+        # ── Cutting (cpptraj order: 1) — trajectory only ──────────────────
+        group = form.addGroup('Cutting', condition=hasTraj)
+        group.addParam('doDrop', params.BooleanParam,
+                       label='Cut trajectory?: ', default=False,
+                       help='Keep only frames within a time (or frame-number) window.')
+        group.addParam('cutByTime', params.BooleanParam,
+                       label='Define window by time?: ', default=True,
+                       condition='doDrop',
+                       help='If Yes, the window is given in simulation time and converted '
+                            'to frame indices using the input trajectory metadata '
+                            '(frames / time). If No, frame indices are used directly.')
+        line = group.addLine('Time window: ',
+                             condition='doDrop and cutByTime',
+                             help='Start and end times (0 = use the trajectory limits).')
+        line.addParam('firstTime', params.FloatParam, label='Start: ', default=0.0)
+        line.addParam('lastTime',  params.FloatParam, label='End: ',   default=0.0)
+        line.addParam('timeUnit',  params.EnumParam,
+                      label='Units: ', default=TIME_UNIT_NS,
+                      choices=['ps', 'ns'])
+        line2 = group.addLine('Frame window: ',
+                              condition='doDrop and not cutByTime',
+                              help='First and last frame numbers. Frames are counted '
+                                   'starting at 1. Enter 0 to use the trajectory limits (first/last frame).')
+        line2.addParam('firstFrame', params.IntParam, label='Start: ', default=1)
+        line2.addParam('lastFrame',  params.IntParam, label='End: ',   default=0)
+
+        # ── Subsampling (cpptraj order: 1) — trajectory only ──────────────
+        group = form.addGroup('Subsampling', condition=hasTraj)
+        group.addParam('doSubsample', params.BooleanParam,
+                       label='Subsample trajectory?: ', default=False,
+                       help='Keep only every N-th frame from the (possibly cut) trajectory.')
+        group.addParam('subsampleF', params.IntParam,
+                       label='Keep every N frames: ', default=10,
+                       condition='doSubsample',
+                       help='Frame stride. E.g. 10 = keep 1 frame out of 10.')
+
+        # ── Imaging (cpptraj order: 2) — trajectory only ──────────────────
+        group = form.addGroup('Imaging (PBC fix)', condition=hasTraj)
+        group.addParam('doAutoimage', params.BooleanParam,
+                       label='Autoimage trajectory?: ', default=False,
+                       help='Re-image molecules back into the primary unit cell using the '
+                            'cpptraj *autoimage* command. Recommended as the first action '
+                            'for solvated systems. Requires box information in the trajectory.')
+        group.addParam('autoimageAnchor', params.StringParam,
+                       label='Anchor mask: ', default='',
+                       condition='doAutoimage',
+                       help='Amber residue mask selecting the anchor region that is kept at the '
+                            'box centre during imaging (cpptraj centres its centre of mass and '
+                            'images everything else around it). The ":" prefix means "residues", '
+                            'so ":1-300" selects residues 1 to 300 (e.g. a 300-residue protein). '
+                            'Leave blank to use the whole solute automatically: the protein '
+                            '(plus the ligand residue if the system has one).')
+
+        # ── Fitting (cpptraj order: 4) — trajectory only ──────────────────
+        group = form.addGroup('Fitting', condition=hasTraj)
         group.addParam('doFit', params.BooleanParam,
                        label='RMS-fit trajectory?: ', default=False,
                        help='Superpose every frame onto the first frame of the (processed) '
@@ -179,8 +186,8 @@ class AmberModifySystem(EMProtocol):
                        condition='doFit and fitMaskType=={}'.format(FIT_MASK_CUSTOM),
                        help='Amber atom mask string, e.g. ``:1-250@CA``')
 
-        # ── 6. Running average ─────────────────────────────────────────────
-        group = form.addGroup('Running average')
+        # ── Running average (cpptraj order: 5) — trajectory only ──────────
+        group = form.addGroup('Running average', condition=hasTraj)
         group.addParam('doRunAvg', params.BooleanParam,
                        label='Running average?: ', default=False,
                        help='Apply a coordinate running average with the cpptraj *runavg* '
@@ -192,8 +199,8 @@ class AmberModifySystem(EMProtocol):
                        help='Number of frames averaged in each window (>= 2). '
                             'Larger values = stronger smoothing.')
 
-        # ── Output format ─────────────────────────────────────────────────
-        group = form.addGroup('Output')
+        # ── Output format (cpptraj order: 6) — trajectory only ────────────
+        group = form.addGroup('Output', condition=hasTraj)
         group.addParam('outputFormat', params.EnumParam,
                        label='Output trajectory format: ', default=OUT_FMT_NC,
                        choices=['NetCDF (.nc)', 'Charmm DCD (.dcd)', 'Gromacs XTC (.xtc)',
@@ -224,11 +231,7 @@ class AmberModifySystem(EMProtocol):
         # --- actions (order matters in cpptraj) -----------------------------
         # 1. autoimage first, so subsequent actions see whole molecules
         if self.doAutoimage and hasTraj:
-            aiLine = 'autoimage'
-            anchor = self.autoimageAnchor.get().strip()
-            if anchor:
-                aiLine += ' anchor {}'.format(anchor)
-            lines.append(aiLine)
+            lines.append('autoimage anchor {}'.format(self._getAnchorMask()))
 
         # 2. strip before fitting (do not fit onto solvent) and write new topology
         if self.doStrip:
@@ -247,8 +250,8 @@ class AmberModifySystem(EMProtocol):
         if hasTraj:
             lines.append('trajout {} {}'.format(
                 os.path.abspath(self.getCleanTrajectoryFile()), self._getOutputFormatKw()))
-        else:
-            # no trajectory: only a processed structure is produced
+        elif self.doStrip:
+            # coordinates-only input being stripped: write the stripped structure directly
             lines.append('trajout {} pdb'.format(
                 os.path.abspath(self.getCleanStructureFile())))
 
@@ -262,20 +265,18 @@ class AmberModifySystem(EMProtocol):
                                   args='-i {}'.format(cpptrajIn),
                                   cwd=self._getPath())
 
-        # If no stripping was done, the output topology equals the input one.
-        if not self.doStrip:
-            shutil.copy(topFile, self.getCleanTopologyFile())
-
-        # Extract a single-frame structure (consistent with the output topology) from
-        # the processed trajectory. Done in a separate pass so it does not interact
-        # with frame-buffering actions such as runavg.
-        if hasTraj:
+        # Cut / subsample / autoimage / fit / running-average all preserve the atom set,
+        # so the topology and reference structure are unchanged and the output reuses the
+        # input's. Only stripping changes the atoms, so only then is a new reference
+        # structure extracted (from the stripped trajectory, in a separate pass so it does
+        # not interact with frame-buffering actions such as runavg).
+        if self.doStrip and hasTraj:
             self.writeSystemStructure()
 
     def writeSystemStructure(self):
         """Write the first frame of the processed trajectory to a PDB structure file
-        that matches the (possibly stripped) output topology."""
-        lines = ['parm {}'.format(os.path.abspath(self.getCleanTopologyFile())),
+        that matches the stripped output topology."""
+        lines = ['parm {}'.format(self.getOutTopologyFile()),
                  'trajin {} 1 1'.format(os.path.abspath(self.getCleanTrajectoryFile())),
                  'trajout {} pdb'.format(os.path.abspath(self.getCleanStructureFile())),
                  'run', 'quit']
@@ -291,22 +292,15 @@ class AmberModifySystem(EMProtocol):
         inSystem = self.amberSystem.get()
         _, hasTraj = self._getTrajSource()
 
-        outSystem = AmberSystem()
-        outSystem.setSystemFile(os.path.abspath(self.getCleanStructureFile()))
-        outSystem.setTopologyFile(os.path.abspath(self.getCleanTopologyFile()))
-
-        # carry over force-field / ligand metadata (unchanged by this protocol)
-        if inSystem.getForceField():
-            outSystem.setForceField(inSystem.getForceField())
-        if inSystem.getWaterForceField():
-            outSystem.setWaterForceField(inSystem.getWaterForceField())
-        if inSystem.getLigandID():
-            outSystem.setLigandID(inSystem.getLigandID())
-        if inSystem.getLigTopologyFile():
-            outSystem.setLigTopologyFile(inSystem.getLigTopologyFile())
-        # the original coordinates only stay valid if no atoms were stripped
-        if not self.doStrip and inSystem.getCrdFile():
-            outSystem.setCrdFile(inSystem.getCrdFile())
+        # Clone the input so all metadata is carried over. Only stripping changes the atom
+        # set, so only then do we swap in the new topology + reference structure (and drop
+        # the now-mismatched coordinates). Every other operation keeps the input's topology
+        # and structure, which already match the atoms in the modified trajectory.
+        outSystem = inSystem.clone()
+        if self.doStrip:
+            outSystem.setTopologyFile(os.path.abspath(self.getCleanTopologyFile()))
+            outSystem.setSystemFile(os.path.abspath(self.getCleanStructureFile()))
+            outSystem.setCrdFile(None)
 
         if hasTraj:
             outSystem.setTrajectoryFile(os.path.abspath(self.getCleanTrajectoryFile()))
@@ -410,11 +404,9 @@ class AmberModifySystem(EMProtocol):
         return ' '.join(parts)
 
     def _psPerFrame(self):
-        inSystem = self.amberSystem.get()
-        nFrames, nTime = inSystem.getNFrames(), inSystem.getNTime()
-        if nFrames and nTime:
-            return nTime / nFrames
-        return None
+        # Per-frame spacing of the *input* trajectory, derived by the system object
+        # from the frame/time metadata it read directly from the input trajectory.
+        return self.amberSystem.get().getTimeStep()
 
     def _estimateOutTime(self):
         """Best-effort total time (ps) of the output trajectory, derived from the input
@@ -431,7 +423,7 @@ class AmberModifySystem(EMProtocol):
     def _countFrames(self, trjFile):
         """Return the number of frames in trjFile using ``cpptraj -tl``, or None."""
         import re
-        topFile = os.path.abspath(self.getCleanTopologyFile())
+        topFile = self.getOutTopologyFile()
         amberPlugin.runAmbertools(self, program='cpptraj',
                                   args='-p {} -y {} -tl'.format(topFile, trjFile))
         for logName in ('run.stdout', 'run.stderr'):
@@ -443,6 +435,13 @@ class AmberModifySystem(EMProtocol):
                         if m:
                             return int(m.group(1))
         return None
+
+    def getOutTopologyFile(self):
+        """Topology of the output system: the new stripped one when stripping, otherwise the
+        input's (unchanged) topology, which still matches the modified trajectory."""
+        if self.doStrip:
+            return os.path.abspath(self.getCleanTopologyFile())
+        return os.path.abspath(self.amberSystem.get().getTopologyFile())
 
     def getCleanTopologyFile(self):
         top = self.amberSystem.get().getTopologyFile()
@@ -461,6 +460,19 @@ class AmberModifySystem(EMProtocol):
         sysFile = self.amberSystem.get().getSystemFile()
         base = os.path.splitext(os.path.basename(sysFile))[0] if sysFile else 'system'
         return os.path.abspath(self._getPath(base + '_modified.pdb'))
+
+    def _getAnchorMask(self):
+        """Anchor region kept centred by autoimage. If the user left the mask blank, default
+        to the whole solute: the protein residues plus the ligand residue when the system has
+        one."""
+        anchor = self.autoimageAnchor.get().strip()
+        if anchor:
+            return anchor
+        inSystem = self.amberSystem.get()
+        mask = ':{}'.format(PROTEIN_RES)
+        if inSystem.hasLig() and inSystem.getLigandID():
+            mask += ',{}'.format(inSystem.getLigandID())
+        return mask
 
     def _getStripMask(self):
         sel = self.stripSelection.get()
@@ -488,5 +500,5 @@ class AmberModifySystem(EMProtocol):
     @staticmethod
     def _timeToPs(value, unitStr):
         """Convert a time value to picoseconds."""
-        factors = {'fs': 1e-3, 'ps': 1.0, 'ns': 1e3}
+        factors = {'ps': 1.0, 'ns': 1e3}
         return value * factors.get(unitStr, 1.0)
