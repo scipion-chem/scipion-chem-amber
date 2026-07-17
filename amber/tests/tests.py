@@ -216,7 +216,7 @@ class TestAmberLigSimulation(TestAmberPrepareSystemLig):
         self.assertIsNotNone(getattr(protSim, 'outputSystem', None))
 
 
-class TestAmberTrajMod(TestAmberCpuSimulation):
+class TestAmberSystemModification(TestAmberCpuSimulation):
     """Prepare -> CPU simulation (saves a trajectory) -> modify the trajectory
     with several cpptraj operation combinations."""
 
