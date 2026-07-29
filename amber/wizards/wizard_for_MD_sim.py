@@ -25,10 +25,16 @@
 # *
 # **************************************************************************
 
-# Imports
-from pwchem.wizards import DeleteElementWizard, VariableWizard, WatchElementWizard
+import os
+import tkinter as tk
+from tkinter import messagebox
+from pyworkflow.gui import ListTreeProviderString, dialog
+from pwem.objects import Pointer, String
 
-from ..protocols import AmberMDSimulation
+from pwchem.wizards import DeleteElementWizard, VariableWizard, WatchElementWizard
+from pwchem.utils import cifFromASFile
+
+from ..protocols import AmberMDSimulation, AmberSystemPrep
 from ..constants import *
 
 class AmberAddElementSummaryWizard(VariableWizard):
@@ -97,10 +103,6 @@ DeleteElementWizard().addTarget(protocol=AmberMDSimulation,
                                 inputs=['deleteStep'],
                                 outputs=['workFlowSteps', 'summarySteps'])
 
-# WatchElementWizard().addTarget(protocol=AmberMDSimulation,
-#                                 targets=['watchStep'],
-#                                 inputs=['watchStep'],
-#                                 outputs=['workFlowSteps', 'summarySteps'])
 
 
 class AmberAddDefaultWorkflow(VariableWizard):
@@ -149,3 +151,141 @@ AmberAddDefaultWorkflow().addTarget(protocol=AmberMDSimulation,
                                     targets=['memLigDefault'],
                                     inputs=[''],
                                     outputs=['workFlowSteps', 'summarySteps'])
+
+
+class DisulfideBondWizard(VariableWizard):
+    """Wizard to select multiple pairs of CYS residues for disulfide bond creation"""
+    _targets, _inputs, _outputs = [], {}, {}
+
+    def parseCysPairs(self, inputFile, protocol):
+        """Parse PDB/mmCIF file and return CYS pairs whose SG atoms are 1.5–2.5 Å apart
+        (typical disulfide bond distance ~2.05 Å).
+
+        Returns: [((chainA, resIdxA, resNameA), (chainB, resIdxB, resNameB)), ...]
+        Standardizes any input to mmCIF format using pwem utilities before parsing.
+        """
+        base, _ = os.path.splitext(os.path.basename(inputFile))
+        tmpCifPath = os.path.abspath(protocol.getProject().getTmpPath(f'{base}_temp.cif'))
+
+        cifFile = cifFromASFile(inputFile, tmpCifPath)
+        if not cifFile or not os.path.exists(cifFile):
+            print(f"ERROR: Conversion failed or mmCIF file missing: {cifFile}")
+            return []
+
+        sgCoords = self._extractSgCoordinates(cifFile)
+
+        if cifFile == tmpCifPath and os.path.exists(tmpCifPath):
+            try:
+                os.remove(tmpCifPath)
+            except OSError:
+                pass
+
+        return self._findDisulfidePairs(sgCoords)
+
+    def _extractSgCoordinates(self, cifFile):
+        """Helper method to read an mmCIF file and extract CYS SG coordinates."""
+        sgCoords = {}
+        with open(cifFile, 'r') as f:
+            for line in f:
+                if not line.startswith(('ATOM', 'HETATM')):
+                    continue
+
+                parts = line.split()
+                # Guard: ensure valid length, specific residue (CYS), and atom (SG)
+                if len(parts) < 13 or parts[5].strip() != 'CYS' or parts[3].strip() != 'SG':
+                    continue
+
+                try:
+                    chainId = parts[6].strip()
+                    chainId = '_' if not chainId or chainId == '.' else chainId
+
+                    resNumStr = parts[8].strip()
+                    if not resNumStr or not resNumStr.replace('-', '').isdigit():
+                        continue
+
+                    sgCoords[(chainId, int(resNumStr))] = (
+                        float(parts[10]), float(parts[11]), float(parts[12])
+                    )
+                except (ValueError, IndexError) as e:
+                    print(f"WARNING: Could not parse line: {line.rstrip()}\n  Error: {e}")
+                    continue
+
+        return sgCoords
+
+    def _findDisulfidePairs(self, sgCoords):
+        """Helper method to compute pairwise distances and return valid CYS pairs."""
+        pairs = []
+        keys = list(sgCoords.keys())
+
+        for i, (chainA, resIdxA) in enumerate(keys):
+            xA, yA, zA = sgCoords[(chainA, resIdxA)]
+
+            for j in range(i + 1, len(keys)):
+                chainB, resIdxB = keys[j]
+                xB, yB, zB = sgCoords[(chainB, resIdxB)]
+
+                # Pairwise SG–SG distance filter
+                dist = ((xA - xB) ** 2 + (yA - yB) ** 2 + (zA - zB) ** 2) ** 0.5
+                if 1.5 <= dist <= 2.5:
+                    pairs.append((
+                        (chainA, resIdxA, 'CYS'),
+                        (chainB, resIdxB, 'CYS'),
+                    ))
+
+        return pairs
+
+    def _pairLabel(self, pair):
+        (chainA, idxA, nameA), (chainB, idxB, nameB) = pair
+        return f"{nameA} {chainA}:{idxA} \u2194 {nameB} {chainB}:{idxB}"
+
+    def show(self, form, *params):
+        """Main wizard entry point"""
+        inputParams, outputParams = self.getInputOutput(form)
+        protocol = form.protocol
+
+        inputObj = getattr(protocol, inputParams[0]).get()
+
+        if hasattr(inputObj, 'getFileName'):
+            pdbFile = inputObj.getFileName()
+        else:
+            dialog.showError("Missing Input",
+                         "Please select a valid input structure first.",
+                               form.root)
+
+        cysPairs = self.parseCysPairs(pdbFile, protocol)
+
+        if not cysPairs:
+            dialog.showInfo("Disulfide Bonds",
+                            "No CYS pairs with SG distance in [1.5, 2.5] Å found.",
+                            form.root)
+            return
+
+        pairLabels = [self._pairLabel(p) for p in cysPairs]
+        labelStrings = [String(lbl) for lbl in pairLabels]
+
+        provider = ListTreeProviderString(labelStrings)
+        dlg = dialog.ListDialog(
+            form.root, "Select Disulfide Bonds", provider,
+            "Select which disulfide bonds to form\n"
+            "(Ctrl+Click or Shift+Click for multiple):"
+        )
+
+        if dlg.values:
+            selectedLabels = {val.get() for val in dlg.values}
+
+            # Encode each selected pair as "chainA_resIdxA-chain_resIdxB"
+            selectedTokens = []
+            for pair, label in zip(cysPairs, pairLabels):
+                if label in selectedLabels:
+                    (chainA, idxA, _), (chainB, idxB, _) = pair
+                    selectedTokens.append(f"{chainA}_{idxA}-{chainB}_{idxB}")
+
+            if selectedTokens:
+                form.setVar(outputParams[0], '/'.join(selectedTokens))
+
+DisulfideBondWizard().addTarget(
+    protocol=AmberSystemPrep,
+    targets=['disulfideBridgesNumber'],
+    inputs=['inputStructure'],
+    outputs=['disulfideBridgesNumber']
+)
