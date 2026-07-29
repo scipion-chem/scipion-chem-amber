@@ -306,29 +306,59 @@ class AmberModifySystem(EMProtocol):
     # ── validation / info ──────────────────────────────────────────────────────
     def _validate(self):
         errs = []
-        inSystem = self.amberSystem.get()
+        for check in (
+                self._checkRunAvg,
+                self._checkSubsample,
+                self._checkFrameRange,
+                self._checkTimeCut,
+                self._checkFitMask,
+                self._checkStripMask,
+        ):
+            err = check()
+            if err:
+                errs.append(err)
+        return errs
 
+    def _checkRunAvg(self):
         if self.doRunAvg and self.runAvgWindow.get() < 2:
-            errs.append('The running-average window must be >= 2 frames.')
+            return 'The running-average window must be >= 2 frames.'
+        return None
+
+    def _checkSubsample(self):
         if self.doSubsample and self.subsampleF.get() < 2:
-            errs.append('The subsampling stride must be >= 2.')
-        if self.doDrop and not self.cutByTime:
-            f0, f1 = self.firstFrame.get(), self.lastFrame.get()
-            if f1 != 0 and f1 <= f0:
-                errs.append('The last frame must be greater than the first frame '
-                            '(set Last = 0 to use the end of the trajectory).')
-        if self.doDrop and self.cutByTime and inSystem is not None:
-            if not inSystem.getNFrames() or not inSystem.getNTimeNs():
-                errs.append('Time-based cutting needs the input trajectory metadata '
-                            '(frames / time), which is not available. Use frame-based '
-                            'cutting instead.')
+            return 'The subsampling stride must be >= 2.'
+        return None
+
+    def _checkFrameRange(self):
+        if not (self.doDrop and not self.cutByTime):
+            return None
+        f0, f1 = self.firstFrame.get(), self.lastFrame.get()
+        if f1 != 0 and f1 <= f0:
+            return ('The last frame must be greater than the first frame '
+                    '(set Last = 0 to use the end of the trajectory).')
+        return None
+
+    def _checkTimeCut(self):
+        inSystem = self.amberSystem.get()
+        if not (self.doDrop and self.cutByTime and inSystem is not None):
+            return None
+        if not inSystem.getNFrames() or not inSystem.getNTimeNs():
+            return ('Time-based cutting needs the input trajectory metadata '
+                    '(frames / time), which is not available. Use frame-based '
+                    'cutting instead.')
+        return None
+
+    def _checkFitMask(self):
         if self.doFit and self.fitMaskType.get() == FIT_MASK_CUSTOM \
                 and not self.fitMaskCustom.get().strip():
-            errs.append('A custom fit mask must be provided.')
+            return 'A custom fit mask must be provided.'
+        return None
+
+    def _checkStripMask(self):
         if self.doStrip and self.stripSelection.get() == STRIP_CUSTOM \
                 and not self.stripMaskCustom.get().strip():
-            errs.append('A custom strip mask must be provided.')
-        return errs
+            return 'A custom strip mask must be provided.'
+        return None
 
     def _warnings(self):
         warns = []
