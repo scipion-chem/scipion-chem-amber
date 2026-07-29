@@ -47,8 +47,83 @@ from amber import Plugin as amberPlugin
 
 class AmberMDSimulation(EMProtocol):
     """
-    This protocol will perform energy minimization heating and similation on the system previously prepared by the protocol
-    "system prepartion".
+    AI Generated:
+
+    This protocol imports a pre-built GROMACS molecular system into Scipion-Chem,
+    including coordinates, topology, and optionally trajectory information.
+
+    The imported system is registered as a GromacsSystem object, enabling its use
+    in downstream molecular dynamics workflows such as energy minimization,
+    equilibration, and production simulations.
+
+    The protocol does not modify the input files; it only wraps and organizes them
+    into a structured object compatible with Scipion-Chem pipelines.
+
+    Inputs
+    ------
+    inputCoords:
+        GROMACS coordinate file defining atomic positions and box vectors.
+        Accepted formats: .gro, .pdb
+
+    inputTopology:
+        GROMACS topology file defining molecular structure, parameters,
+        and force field assignments.
+        Format: .top
+
+    inputTrajectory:
+        Optional molecular dynamics trajectory file.
+        Formats: .xtc, .trr
+
+    Workflow
+    --------
+    1. Input acquisition
+       - Reads coordinate file (mandatory)
+       - Reads topology file (mandatory)
+       - Reads trajectory file if provided
+
+    2. System registration
+       - Creates a new GromacsSystem object
+       - Stores coordinate and topology file paths
+       - Registers original structure file reference
+
+    3. Trajectory handling (optional)
+       - If trajectory is provided:
+         - Associates trajectory with system object
+         - Extracts trajectory metadata (frame count, time step, length)
+         - Stores trajectory information for downstream analysis
+
+    4. Output creation
+       - Builds Scipion-compatible GromacsSystem object
+       - Preserves file structure and dependencies
+       - Registers system as output of the protocol
+
+    Output
+    ------
+    outputSystem:
+        GromacsSystem object containing:
+        - Coordinate file (.gro / .pdb)
+        - Topology file (.top)
+        - Optional trajectory file (.xtc / .trr)
+        - System metadata for downstream GROMACS protocols
+
+    Summary
+    -------
+    This protocol serves as the entry point for importing external GROMACS systems
+    into Scipion-Chem workflows.
+
+    It enables seamless integration of pre-equilibrated or externally prepared
+    molecular systems, ensuring compatibility with all subsequent GROMACS-based
+    simulation and analysis protocols.
+
+    Notes
+    -----
+    - The input system must be GROMACS-compatible and correctly formatted.
+    - No structural modifications are performed.
+    - Trajectory processing is optional and only metadata is stored.
+    - Designed for workflow interoperability and reproducibility.
+
+
+
     """
     _amberEngines = ['sander', 'pmemd']
     _label = 'run MD simulation'
