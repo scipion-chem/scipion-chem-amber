@@ -303,21 +303,33 @@ class AmberSystemPrep(EMProtocol):
 
     def tleapStep(self):
         hasLigand = (self.inputFrom.get() == LIGAND)
-        hasMembrane = self.tMem
+        hasMembrane = self.tMem.get()
+        cmdsTleap = []
 
+        # Input structure
         if hasMembrane:
             inputStructure = self.findFile(self.getTargetFileDir(), '_bilayer_aligned.pdb')
         else:
             inputStructure = self.findFile(self.getTargetFileDir(), '_amber.pdb')
-
         targetBasename = self.getTleapSystemName()
+
+        # Ligand files
+        ligLib = ligMol2 = ligFrcmod = None
+        if hasLigand:
+            ligLib = self.findFile(self.getLigandFileDir(), '.lib')
+            ligFrcmod = self.findFile(self.getLigandFileDir(), '.frcmod')
+            # membrane run uses the aligned mol2, non-membrane the plain one
+            ligMol2 = (self.findFile(self.getLigandFileDir(), '_aligned.mol2') if hasMembrane
+                       else self.findFile(self.getLigandFileDir(), '.mol2'))
+
+        # Ions (non-membrane only)
+        nCation = nAnion = 0
         if not hasMembrane:
             nCation, nAnion = self.calcIonConc(inputStructure, self.getEnumText('proteinFF'),
                                                self.getEnumText('waterForceField'), self.ionConc.get())
             print(f'{nCation} cations and {nAnion} anion will be added\n')
 
-        cmdsTleap = []
-        # load force fields
+        # Load force fields
         cmdsTleap.append(f"source leaprc.protein.{self.getEnumText('proteinFF')}")
         cmdsTleap.append(f"source leaprc.water.{self.getEnumText('waterForceField')}")
         if hasMembrane:
@@ -325,11 +337,12 @@ class AmberSystemPrep(EMProtocol):
         if hasLigand:
             cmdsTleap.append(f"source leaprc.{self.getEnumText('ligandFF')}")
 
-        # load components
+        # Load Protein
         components = []
         cmdsTleap.append(f"PROT = loadPdb {inputStructure}")
         components.append('PROT')
 
+        # Add S-S
         if self.getEnumText('disulfideBridges') == 'None':
             print("No disulfide bridges requested, converting all CYX to CYS...")
             self._clearAllDisulfides(inputStructure)
@@ -348,7 +361,6 @@ class AmberSystemPrep(EMProtocol):
                 cmdsTleap.extend(bonds)
             else:
                 print("Notice: No sslink file found, skipping automated disulfides")
-
         else:
             print("Processing manual disulfide configuration...")
             originalPdb = self._getExtraPath(f'{self.getSystemName()}.pdb')
@@ -360,41 +372,53 @@ class AmberSystemPrep(EMProtocol):
             )
             cmdsTleap.extend(manualBonds)
 
-        # ligand
+        # Ligand (non-membrane)
         if hasLigand and not hasMembrane:
-            cmdsTleap.append(f"loadoff {self.findFile(self.getLigandFileDir(), '.lib')}")
-            cmdsTleap.append(f"LIG = loadmol2 {self.findFile(self.getLigandFileDir(), '.mol2')}")
+            cmdsTleap.append(f"loadoff {ligLib}")
+            cmdsTleap.append(f"LIG = loadmol2 {ligMol2}")
+            cmdsTleap.append(f"loadamberparams {ligFrcmod}")
             components.append('LIG')
-            cmdsTleap.append(f"loadamberparams {self.findFile(self.getLigandFileDir(), '.frcmod')}")
 
-        # membrane
+        # Membrane
         if hasMembrane:
-            memStructure = self.findFile(self.getTargetFileDir(),   "membrane.pdb")
+            memStructure = self.findFile(self.getTargetFileDir(), "membrane.pdb")
+            if not memStructure:
+                raise FileNotFoundError(
+                    f"Membrane mode selected but membrane.pdb not found in {self.getTargetFileDir()}.")
             cmdsTleap.append(f"MEMB = loadPdb {memStructure}")
             components.append('MEMB')
-            if hasLigand:
-                cmdsTleap.append(f"loadoff {self.findFile(self.getLigandFileDir(), '.lib')}")
-                cmdsTleap.append(f"LIG = loadmol2 {self.findFile(self.getLigandFileDir(), '_aligned.mol2')}")
-                components.append('LIG')
-                cmdsTleap.append(f"loadamberparams {self.findFile(self.getLigandFileDir(), '.frcmod')}")
 
+            if hasLigand:
+                cmdsTleap.append(f"loadoff {ligLib}")
+                cmdsTleap.append(f"LIG = loadmol2 {ligMol2}")
+                cmdsTleap.append(f"loadamberparams {ligFrcmod}")
+                components.append('LIG')
+                if not (ligLib and ligMol2 and ligFrcmod):
+                    raise FileNotFoundError(
+                        f"Ligand mode selected but ligand parameter files were not found in "
+                        f"{self.getLigandFileDir()} (.lib={ligLib}, .mol2={ligMol2}, .frcmod={ligFrcmod}). ")
+
+        # Assemble system
         if len(components) == 1:
             cmdsTleap.append('SYSTEM = PROT')
         else:
             cmdsTleap.append(f"SYSTEM = combine {{ {' '.join(components)} }}")
 
-        # solvation non-membrane
+        # Solvation
         if not hasMembrane:
             boxtype = "SolvateBox" if self.getEnumText("solvateStep") == "Cubic" else "SolvateOct"
-
             waterBoxes = {
                 "tip3p": "TIP3PBOX",
                 "tip4pew": "TIP4PEWBOX",
                 "spce": "SPCBOX",
                 "opc": "OPCBOX",
-                "opc3": "OPC3BOX"
+                "opc3": "OPC3BOX",
             }
             waterModel = self.getEnumText("waterForceField")
+            if waterModel not in waterBoxes:
+                raise KeyError(
+                    f"No tleap solvent box mapped for water force field '{waterModel}'. "
+                    f"Known: {', '.join(waterBoxes)}.")
             wat = waterBoxes[waterModel]
 
             cmdsTleap.append("center SYSTEM")
@@ -402,20 +426,19 @@ class AmberSystemPrep(EMProtocol):
             cmdsTleap.append(f"{boxtype} SYSTEM {wat} {int(self.minDist.get())} iso")
             if self.addIons.get():
                 cmdsTleap.append(
-                    f"addIonsRand SYSTEM {self.getEnumText('cationType')} {nCation} {self.getEnumText('anionType')} {nAnion}")
-
-        # solvation membrane
-        if hasMembrane:
+                    f"addIonsRand SYSTEM {self.getEnumText('cationType')} {nCation} "
+                    f"{self.getEnumText('anionType')} {nAnion}")
+        else:
             x, y, z = self._memBox
             cmdsTleap.append(f"set SYSTEM box {{{x:.3f} {y:.3f} {z:.3f}}}")
 
+        # Save outputs
         cmdsTleap.append(f"savepdb SYSTEM {targetBasename}.pdb")
         cmdsTleap.append(f"saveAmberParm SYSTEM {targetBasename}_woChains.parm7 {targetBasename}.crd")
         cmdsTleap.append(f"savepdb SYSTEM {targetBasename}_system.pdb")
-
         cmdsTleap.append("quit")
-        leapFile = os.path.join(self.getTargetFileDir(), "leap_commands.txt")
 
+        leapFile = os.path.join(self.getTargetFileDir(), "leap_commands.txt")
         with open(leapFile, "w") as f:
             f.write("\n".join(cmdsTleap))
 
@@ -428,14 +451,13 @@ class AmberSystemPrep(EMProtocol):
             f"outparm {targetBasename}.parm7",
             "quit"
         ]
-
         parmedFile = os.path.join(self.getTargetFileDir(), "parmed_commands.txt")
         with open(parmedFile, "w") as f:
             f.write("\n".join(cmdsParmed))
 
         amber.Plugin.runAmbertools(self, "parmed", "-i parmed_commands.txt", cwd=self.getTargetFileDir())
 
-        # 2. Generate the final system PDB with Chain IDs using ambpdb
+        # Generate the final system PDB with Chain IDs using ambpdb
         # (ambpdb outputs to stdout, so we write it directly via Python's subprocess)
 
         finalPdbFile = os.path.join(self.getTargetFileDir(), f"{targetBasename}_system_chains.pdb")
