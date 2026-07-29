@@ -55,8 +55,181 @@ GAPS_OPTIONS = ['No', 'Gaps termini', 'All termini']
 
 class AmberSystemPrep(EMProtocol):
     """
-    This protocol will prepare a system for MD simulation. It will clean the input PDB for further analysis
-    and generate topology and coordinate files necessary for MD simulation.
+    AI Generated:
+
+    This protocol prepares a molecular system for molecular dynamics (MD)
+    simulations using the AMBER force field ecosystem (AmberTools + tleap workflow).
+
+    It supports both protein-only systems and protein–ligand complexes, with
+    optional membrane embedding, solvation, ion addition, and force field
+    parametrization.
+
+    The protocol automates the full preparation pipeline required to generate
+    AMBER-compatible topology and coordinate files for downstream MD simulations.
+
+    Inputs
+    ------
+    inputFrom:
+        Defines the input source of the system:
+        - AtomStruct: single protein/structure file
+        - SetOfSmallMolecules: protein + selected ligand
+
+    inputStructure:
+        Atomic structure of the receptor (PDB or compatible format).
+
+    inputSetOfMols:
+        Set of docked small molecules (used when inputFrom = SetOfSmallMolecules).
+
+    inputLigand:
+        Name of the ligand to select from the input set (if applicable).
+
+    Target Modification Options
+    ---------------------------
+    targetProteinResidues:
+        If True, keeps only protein residues in the system.
+
+    targetAmberCompatibleResidues:
+        If True, filters residues to AMBER-compatible ones.
+
+    targetPhSimulation:
+        If True, renames GLU, ASP, HIS for constant pH simulations.
+
+    targetReduce:
+        If True, runs AMBER reduce tool to add hydrogens.
+
+    targetTleap:
+        If True, uses tleap to add missing atoms (experimental).
+
+    Membrane Modeling (optional)
+    ----------------------------
+    tMem:
+        If True, embeds the protein in a lipid bilayer.
+
+    memLipids:
+        Lipid composition of the membrane (e.g., POPC, CHL1 mixtures).
+
+    memRatio:
+        Relative lipid ratios for membrane construction.
+
+    memPosition:
+        Defines membrane orientation method:
+        - Preoriented
+        - MEMEMBED
+        - PPM
+
+    Force Field Configuration
+    -------------------------
+    proteinFF:
+        AMBER protein force field selection (e.g., ff14SB, ff19SB).
+
+    ligandCharge:
+        Charge model for ligand parametrization:
+        - AM1-BCC
+        - Mulliken
+        - Gasteiger
+
+    ligandFF:
+        Ligand force field (gaff, gaff2, ESPALOMA).
+
+    lipidFF:
+        Lipid force field (lipid21, lipid17).
+
+    WaterForceField:
+        Water model used for solvation (tip3p, tip4pew, opc, etc.).
+
+    Disulfide Bridges
+    ------------------
+    DisulfideBridges:
+        Enables manual definition of S–S bonds.
+
+    DisulfideBridgesNumber:
+        Residue pairs defining disulfide bonds.
+
+    Solvent Box
+    ------------
+    solvateStep:
+        Defines box shape:
+        - Cubic
+        - Octahedral
+
+    minDist:
+        Minimum solute-to-box boundary distance (Å).
+
+    memDistXY:
+        XY-plane buffer distance for membrane systems.
+
+    memDistZ:
+        Water thickness above/below membrane.
+
+    Ion Configuration
+    ------------------
+    cationType:
+        Type of positive ions (Na+, K+).
+
+    anionType:
+        Type of negative ions (Cl-).
+
+    ionConc:
+        Target salt concentration (M).
+
+    Workflow
+    --------
+    1. Ligand preparation (if applicable)
+       - Converts ligand to SDF/MOL2
+       - Runs antechamber for charge assignment
+       - Generates frcmod parameters using parmchk2
+       - Builds ligand topology using tleap
+
+    2. Protein preprocessing
+       - Cleans and standardizes structure using pdb4amber
+       - Applies optional residue filtering and protonation rules
+
+    3. Membrane embedding (optional)
+       - Uses packmol-memgen to build lipid bilayer system
+       - Aligns protein into membrane environment
+       - Extracts box dimensions for solvation
+
+    4. System assembly (tleap)
+       - Loads protein, ligand, lipids, and force fields
+       - Builds full molecular system
+       - Applies disulfide bonds if defined
+
+    5. Solvation and ion addition
+       - Builds solvent box (TIP3P, SPC, OPC, etc.)
+       - Computes ion concentration using SPLIT method
+       - Adds ions to neutralize and match salt conditions
+
+    6. Output generation
+       - Writes AMBER topology (.parm7)
+       - Writes coordinates (.rst7)
+       - Produces final system PDB for visualization
+
+    Output
+    ------
+    outputSystem:
+        AmberSystem object containing:
+        - AMBER topology file (.parm7)
+        - Coordinate file (.rst7)
+        - System PDB representation
+        - Force field metadata
+        - Optional ligand topology reference
+
+    Summary
+    -------
+    This protocol provides a complete AMBER system preparation pipeline,
+    supporting proteins, ligands, and membrane-embedded systems.
+
+    It integrates AmberTools utilities (antechamber, parmchk2, pdb4amber, tleap)
+    to automate all steps required for MD-ready system generation.
+
+    Notes
+    -----
+    - Requires correctly formatted input structures.
+    - Ligand preparation is performed automatically when selected.
+    - Membrane systems rely on packmol-memgen integration.
+    - Ion concentration is computed using a physically motivated SPLIT method.
+    - Designed for reproducible MD system setup in Scipion workflows.
+
     """
 
     _label = 'system preparation'
