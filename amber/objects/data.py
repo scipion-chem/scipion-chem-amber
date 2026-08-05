@@ -25,7 +25,8 @@
 # *
 # **************************************************************************
 import os, shutil, re
-from subprocess import check_call
+import numpy as np
+
 import pwem.objects.data as data
 import pyworkflow.object as pwobj
 from pwchem.objects import MDSystem
@@ -89,8 +90,8 @@ class AmberSystem(MDSystem):
         return bool(self.getNFrames())
 
     def readTrjInfo(self, protocol, nTimeNs=None):
-        """Populate the trajectory metadata (number of frames and total time in ns)
-        by reading it **from the trajectory file."""
+        """Create trajectory metadata (number of frames and total time in ns)
+        by reading it from the trajectory file."""
         topFile = os.path.abspath(self.getTopologyFile())
         trjFile = os.path.abspath(self.getTrajectoryFile())
 
@@ -125,14 +126,12 @@ class AmberSystem(MDSystem):
 
         return nFrames
 
-    @staticmethod
     def _readTrajTimeNs(trjFile):
         """Return the total elapsed time (ns) actually stored in the trajectory:
         the time stamp of its last frame. Returns None when no usable time is present"""
         if not trjFile or not str(trjFile).lower().endswith(('.nc', '.netcdf', '.ncdf')):
             return None
         try:
-            import numpy as np
             from scipy.io import netcdf_file
             nc = netcdf_file(trjFile, 'r', mmap=False)
             try:

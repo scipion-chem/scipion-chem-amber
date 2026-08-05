@@ -52,7 +52,7 @@ STRIP_CUSTOM      = 2
 OUT_FMT_NC        = 0
 OUT_FMT_DCD       = 1
 OUT_FMT_XTC       = 2
-OUT_FMT_CRD       = 3    # Amber ASCII trajectory (cpptraj keyword 'crd')
+OUT_FMT_CRD       = 3
 OUT_FMT_PDB       = 4
 
 TIME_UNIT_PS = 0
@@ -459,8 +459,7 @@ class AmberModifySystem(EMProtocol):
 
     def _getAnchorMask(self):
         """Anchor region kept centred by autoimage. If the user left the mask blank, default
-        to the whole solute: the protein residues plus the ligand residue when the system has
-        one."""
+        to the whole solute: the protein residues plus the ligand (if present)"""
         anchor = self.autoimageAnchor.get().strip()
         if anchor:
             return anchor

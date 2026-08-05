@@ -217,8 +217,7 @@ class TestAmberLigSimulation(TestAmberPrepareSystemLig):
 
 
 class TestAmberSystemModification(TestAmberCpuSimulation):
-    """Prepare -> CPU simulation (saves a trajectory) -> modify the trajectory
-    with several cpptraj operation combinations."""
+    """CPU simulation and modify the trajectory with several cpptraj operation combinations."""
 
     def _runModify(self, protSim, label, **kwargs):
         protMod = self.newProtocol(
@@ -244,10 +243,8 @@ class TestAmberSystemModification(TestAmberCpuSimulation):
         self.assertTrue(outSys.hasTrajectory())
         self.assertIsNotNone(outSys.getNFrames())
         self.assertGreater(outSys.getNFrames(), 0)
-        # cloned metadata (force field) must be preserved from the input system
         self.assertEqual(outSys.getForceField(),
                          protSim.outputSystem.getForceField())
-        # stripping invalidates the original coordinates, so they are dropped
         self.assertIsNone(outSys.getCrdFile())
 
         # 2. frame-based cut + subsampling -> DCD (must not increase frame count)
