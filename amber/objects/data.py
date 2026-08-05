@@ -126,7 +126,7 @@ class AmberSystem(MDSystem):
 
         return nFrames
 
-    def _readTrajTimeNs(trjFile):
+    def _readTrajTimeNs(self, trjFile):
         """Return the total elapsed time (ns) actually stored in the trajectory:
         the time stamp of its last frame. Returns None when no usable time is present"""
         if not trjFile or not str(trjFile).lower().endswith(('.nc', '.netcdf', '.ncdf')):
