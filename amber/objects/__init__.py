@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 # **************************************************************************
 # *
-# * Authors:     Aida Pinacho Pérez
+# * Authors:     Joaquin Algorta (joaquin.algorta@cnb.csic.es)
 # *
 # * your institution
 # *

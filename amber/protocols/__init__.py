@@ -6,3 +6,4 @@
 
 from .protocol_system_preparation import AmberSystemPrep, STRUCTURE, LIGAND
 from .protocol_MD_Simulation import AmberMDSimulation
+from .protocol_system_modification import AmberModifySystem
